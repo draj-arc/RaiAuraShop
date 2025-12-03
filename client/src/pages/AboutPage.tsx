@@ -9,8 +9,8 @@ export default function AboutPage() {
         <div className="prose prose-lg mx-auto">
           <div className="aspect-video rounded-lg overflow-hidden bg-muted mb-8">
             <img
-              src="https://images.unsplash.com/photo-1611652022419-a9419f74343b?w=1200&q=80"
-              alt="Our Workshop"
+              src="/images/about.jpg"
+              alt="About Rai Aura"
               className="w-full h-full object-cover"
             />
           </div>

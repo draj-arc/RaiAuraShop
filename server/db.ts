@@ -1,15 +1,7 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-import ws from "ws";
+import { db as firestoreDb } from "./firebase";
 import * as schema from "@shared/schema";
 
-neonConfig.webSocketConstructor = ws;
+// For now, we'll use Firestore directly. In a full migration, you'd need to adapt the schema to Firestore collections.
+// This is a placeholder to get the app running with Firebase.
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
-}
-
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle({ client: pool, schema });
+export const db = firestoreDb;

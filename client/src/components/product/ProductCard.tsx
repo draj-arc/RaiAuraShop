@@ -55,7 +55,7 @@ export function ProductCard({ id, name, price, image, slug }: ProductCardProps) 
             </h3>
           </Link>
           <p className="font-serif text-lg text-primary font-semibold" data-testid={`text-product-price-${id}`}>
-            ${price}
+            ₹{price}
           </p>
         </div>
       </CardContent>

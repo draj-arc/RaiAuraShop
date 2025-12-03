@@ -137,9 +137,9 @@ export const insertProductSchema = createInsertSchema(products).omit({
   id: true,
   createdAt: true,
 }).extend({
-  price: z.string().regex(/^\d+(\.\d{1,2})?$/),
-  stock: z.number().int().min(0),
-  images: z.array(z.string().url()).min(1),
+  price: z.string().regex(/^\d+(\.\d{1,2})?$/, "Invalid price format"),
+  stock: z.coerce.number().int().min(0),
+  images: z.array(z.string()).min(1),
 });
 
 export const insertCartItemSchema = createInsertSchema(cartItems).omit({

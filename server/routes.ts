@@ -8,6 +8,14 @@ import Stripe from "stripe";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "dev-secret-key-change-in-production";
 
+// In-memory OTP storage (use Redis in production)
+const otpStore: Map<string, { otp: string; expiresAt: number; isNewUser?: boolean; username?: string }> = new Map();
+
+// Generate 6-digit OTP
+function generateOTP(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 const stripe = process.env.STRIPE_SECRET_KEY 
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-09-30.clover" })
   : null;
@@ -182,8 +190,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/orders", async (req, res) => {
     try {
       const { order, items } = req.body;
+      
+      // Validate stock for each item before creating order
+      for (const item of items) {
+        const product = await storage.getProductById(item.productId);
+        if (!product) {
+          return res.status(400).json({ message: `Product not found: ${item.productName}` });
+        }
+        if (product.stock < item.quantity) {
+          return res.status(400).json({ 
+            message: `Insufficient stock for ${item.productName}. Available: ${product.stock}, Requested: ${item.quantity}` 
+          });
+        }
+      }
+
       const validatedOrder = insertOrderSchema.parse(order);
       const newOrder = await storage.createOrder(validatedOrder, items);
+      
+      // Reduce stock for each ordered item
+      for (const item of items) {
+        const product = await storage.getProductById(item.productId);
+        if (product) {
+          await storage.updateProduct(item.productId, {
+            stock: product.stock - item.quantity
+          });
+        }
+      }
+      
       res.json(newOrder);
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -221,7 +254,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
       
       res.json({ 
-        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin },
+        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
         token 
       });
     } catch (error: any) {
@@ -246,7 +279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
       
       res.json({ 
-        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin },
+        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
         token 
       });
     } catch (error: any) {
@@ -271,6 +304,141 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin });
     } catch (error: any) {
       res.status(401).json({ message: "Invalid token" });
+    }
+  });
+
+  // OTP Request endpoint
+  app.post("/api/otp/request", async (req, res) => {
+    try {
+      const { email, isNewUser, username } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+
+      const existingUser = await storage.getUserByEmail(email);
+      
+      // For signup, check if user already exists
+      if (isNewUser && existingUser) {
+        return res.status(400).json({ message: "Email already registered. Please sign in instead." });
+      }
+
+      // For login, check if user exists
+      if (!isNewUser && !existingUser) {
+        return res.status(404).json({ message: "No account found with this email. Please sign up first." });
+      }
+
+      const otp = generateOTP();
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+      
+      // Store OTP
+      otpStore.set(email, { otp, expiresAt, isNewUser, username });
+      
+      // In production, send OTP via email service (SendGrid, Resend, etc.)
+      // For now, we'll log it and return success
+      console.log(`\n📧 OTP for ${email}: ${otp}\n`);
+      
+      res.json({ 
+        message: "OTP sent successfully",
+        // Remove this in production - only for demo purposes
+        demo_otp: otp 
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // OTP Verify endpoint
+  app.post("/api/otp/verify", async (req, res) => {
+    try {
+      const { email, otp } = req.body;
+      
+      if (!email || !otp) {
+        return res.status(400).json({ message: "Email and OTP are required" });
+      }
+
+      const storedData = otpStore.get(email);
+      
+      if (!storedData) {
+        return res.status(400).json({ message: "OTP expired or not requested. Please request a new OTP." });
+      }
+
+      if (Date.now() > storedData.expiresAt) {
+        otpStore.delete(email);
+        return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+      }
+
+      if (storedData.otp !== otp) {
+        return res.status(400).json({ message: "Invalid OTP. Please try again." });
+      }
+
+      // OTP is valid, clear it
+      otpStore.delete(email);
+
+      let user = await storage.getUserByEmail(email);
+      
+      // If new user signup via OTP
+      if (!user && storedData.isNewUser) {
+        // Create user with a random password (they'll use OTP to login)
+        const randomPassword = Math.random().toString(36).slice(-12);
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        
+        user = await storage.createUser({
+          username: storedData.username || email.split('@')[0],
+          email,
+          password: hashedPassword,
+        });
+      }
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
+      
+      res.json({ 
+        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
+        token,
+        message: storedData.isNewUser ? "Account created successfully!" : "Logged in successfully!"
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Google Auth endpoint
+  app.post("/api/auth/google", async (req, res) => {
+    try {
+      const { email, username, googleId, photoURL } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+
+      let user = await storage.getUserByEmail(email);
+      
+      if (!user) {
+        // Create new user from Google auth
+        const randomPassword = Math.random().toString(36).slice(-12);
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        
+        user = await storage.createUser({
+          username: username || email.split('@')[0],
+          email,
+          password: hashedPassword,
+        });
+        
+        console.log(`✅ New Google user created: ${email}`);
+      }
+
+      const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
+      
+      res.json({ 
+        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
+        token 
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
     }
   });
 

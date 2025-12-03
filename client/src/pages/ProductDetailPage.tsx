@@ -82,7 +82,7 @@ export default function ProductDetailPage() {
               {product.name}
             </h1>
             <p className="font-serif text-3xl text-primary font-semibold mb-6" data-testid="text-product-price">
-              ${product.price}
+              ₹{product.price}
             </p>
 
             {product.material && (
@@ -110,16 +110,21 @@ export default function ProductDetailPage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => setQuantity(quantity + 1)}
+                  onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
+                  disabled={quantity >= product.stock}
                   className="hover-elevate active-elevate-2"
                   data-testid="button-increase-quantity"
                 >
                   +
                 </Button>
               </div>
-              {product.stock > 0 && (
+              {product.stock > 0 ? (
                 <p className="text-sm text-muted-foreground mt-2" data-testid="text-stock">
-                  {product.stock} in stock
+                  {product.stock} in stock {quantity >= product.stock && <span className="text-orange-500">(max reached)</span>}
+                </p>
+              ) : (
+                <p className="text-sm text-red-500 mt-2" data-testid="text-stock">
+                  Out of stock
                 </p>
               )}
             </div>
@@ -151,7 +156,7 @@ export default function ProductDetailPage() {
                 <Truck className="h-5 w-5 text-primary mt-0.5" />
                 <div>
                   <p className="font-medium text-sm">Free Shipping</p>
-                  <p className="text-sm text-muted-foreground">On orders over $100</p>
+                  <p className="text-sm text-muted-foreground">On orders over ₹999</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -181,7 +186,7 @@ export default function ProductDetailPage() {
               </TabsContent>
               <TabsContent value="delivery" className="mt-4 text-muted-foreground">
                 <p className="leading-relaxed">
-                  We offer free standard shipping on orders over $100. Express shipping is available at checkout.
+                  We offer free standard shipping on orders over ₹999. Express shipping is available at checkout.
                   Orders are processed within 1-2 business days and typically arrive within 5-7 business days.
                 </p>
               </TabsContent>

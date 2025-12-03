@@ -19,7 +19,7 @@ export default function PoliciesPage() {
           <TabsContent value="shipping" className="mt-6 space-y-4 text-muted-foreground">
             <h2 className="font-serif text-2xl text-foreground mb-4">Shipping Policy</h2>
             <p className="leading-relaxed">
-              We offer worldwide shipping on all orders. Standard shipping is free on orders over $100 within the United States.
+              We offer shipping across India on all orders. Standard shipping is free on orders over ₹999. For orders below ₹999, a flat rate of ₹99 applies.
             </p>
             <h3 className="font-semibold text-foreground mt-6 mb-2">Shipping Times:</h3>
             <ul className="list-disc list-inside space-y-2">

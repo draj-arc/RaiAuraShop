@@ -28,6 +28,7 @@ export function useCart() {
   const addToCart = (product: { id: string; name: string; price: string; image: string }) => {
     setCartItems((items) => {
       const existing = items.find((item) => item.productId === product.id);
+      
       if (existing) {
         toast({
           title: "Updated cart",
@@ -60,6 +61,7 @@ export function useCart() {
   };
 
   const updateQuantity = (itemId: string, quantity: number) => {
+    if (quantity < 1) return;
     setCartItems((items) =>
       items.map((item) =>
         item.id === itemId ? { ...item, quantity } : item

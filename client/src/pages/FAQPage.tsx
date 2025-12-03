@@ -13,7 +13,7 @@ export default function FAQPage() {
     },
     {
       question: "Do you offer international shipping?",
-      answer: "Yes, we ship worldwide! Shipping costs and delivery times vary by location. Free shipping is available on orders over $100 within the US.",
+      answer: "Yes, we ship across India! Shipping is free on orders over ₹999. For orders below ₹999, a flat rate of ₹99 applies.",
     },
     {
       question: "What is your return policy?",

@@ -56,7 +56,7 @@ export function CartDrawer({ open, onOpenChange, items, onUpdateQuantity, onRemo
                         {item.productName}
                       </h4>
                       <p className="text-primary font-semibold text-sm mt-1" data-testid={`text-item-price-${item.id}`}>
-                        ${item.productPrice}
+                        ₹{item.productPrice}
                       </p>
                       <div className="flex items-center gap-2 mt-2">
                         <Button
@@ -100,7 +100,7 @@ export function CartDrawer({ open, onOpenChange, items, onUpdateQuantity, onRemo
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Subtotal</span>
                 <span className="font-semibold text-lg text-primary" data-testid="text-subtotal">
-                  ${subtotal.toFixed(2)}
+                  ₹{subtotal.toFixed(2)}
                 </span>
               </div>
               <Link href="/checkout">

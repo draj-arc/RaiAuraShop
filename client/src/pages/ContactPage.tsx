@@ -78,7 +78,7 @@ export default function ContactPage() {
                     Follow us for the latest collections and updates
                   </p>
                   <Button variant="outline" size="sm" className="hover-elevate active-elevate-2" asChild data-testid="button-instagram-contact">
-                    <a href="https://instagram.com" target="_blank" rel="noopener noreferrer">
+                    <a href="https://www.instagram.com/the_raiaura07/" target="_blank" rel="noopener noreferrer">
                       Follow Us
                     </a>
                   </Button>
@@ -94,7 +94,7 @@ export default function ContactPage() {
                 <div>
                   <h3 className="font-semibold mb-1">Email</h3>
                   <p className="text-muted-foreground text-sm">
-                    support@raiaura.com
+                    raiaura.shop@gmail.com
                   </p>
                 </div>
               </CardContent>
@@ -108,9 +108,9 @@ export default function ContactPage() {
                 <div>
                   <h3 className="font-semibold mb-1">Visit Us</h3>
                   <p className="text-muted-foreground text-sm">
-                    123 Jewellery Lane<br />
-                    Fashion District<br />
-                    New York, NY 10001
+                    3rd floor, Parihar Nivas <br />
+                    Vasudev reddy nagar, Attapur,<br />
+                    Hyderabad, Telangana 500048
                   </p>
                 </div>
               </CardContent>

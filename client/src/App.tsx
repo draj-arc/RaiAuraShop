@@ -19,6 +19,10 @@ import ContactPage from "@/pages/ContactPage";
 import FAQPage from "@/pages/FAQPage";
 import PoliciesPage from "@/pages/PoliciesPage";
 import LoginPage from "@/pages/LoginPage";
+import AddressesPage from "@/pages/AddressesPage";
+import WishlistPage from "@/pages/WishlistPage";
+import PaymentMethodsPage from "@/pages/PaymentMethodsPage";
+import RewardsPage from "@/pages/RewardsPage";
 import NotFound from "@/pages/not-found";
 
 export const CartContext = createContext<ReturnType<typeof useCart> | null>(null);
@@ -37,6 +41,10 @@ function Router() {
       <Route path="/faq" component={FAQPage} />
       <Route path="/policies" component={PoliciesPage} />
       <Route path="/login" component={LoginPage} />
+      <Route path="/addresses" component={AddressesPage} />
+      <Route path="/wishlist" component={WishlistPage} />
+      <Route path="/payment-methods" component={PaymentMethodsPage} />
+      <Route path="/rewards" component={RewardsPage} />
       <Route component={NotFound} />
     </Switch>
   );
