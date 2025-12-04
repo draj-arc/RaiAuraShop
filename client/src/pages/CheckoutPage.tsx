@@ -12,6 +12,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { CartContext } from "@/App";
 import { useLocation } from "wouter";
 import { Banknote, CheckCircle, ShoppingBag, MessageCircle } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 
 const checkoutSchema = z.object({
   email: z.string().email("Please enter a valid email"),
@@ -22,6 +24,7 @@ const checkoutSchema = z.object({
   state: z.string().min(2, "Please enter your state"),
   postalCode: z.string().min(6, "PIN code must be 6 digits"),
   country: z.string().default("India"),
+  paymentMethod: z.enum(["cod", "whatsapp"]),
 });
 
 type CheckoutFormData = z.infer<typeof checkoutSchema>;
@@ -45,6 +48,7 @@ export default function CheckoutPage() {
       state: "",
       postalCode: "",
       country: "India",
+      paymentMethod: "cod",
     },
   });
 
@@ -82,8 +86,8 @@ export default function CheckoutPage() {
             phone: data.phone,
           },
           total: total.toFixed(2),
-          status: "confirmed",
-          paymentMethod: "cod",
+          status: data.paymentMethod === "cod" ? "confirmed" : "pending_payment",
+          paymentMethod: data.paymentMethod,
         },
         items: cart.cartItems.map(item => ({
           productId: item.productId,
@@ -104,27 +108,27 @@ export default function CheckoutPage() {
       const newOrderId = result.id || `ORD-${Date.now()}`;
       setOrderId(newOrderId);
 
-      // Create WhatsApp message with order details
-      const orderItems = cart.cartItems.map(item => 
-        `• ${item.productName} x${item.quantity} - ₹${(parseFloat(item.productPrice) * item.quantity).toFixed(0)}`
-      ).join('\n');
-      
-      const whatsappMessage = `🛍️ *New Order from RaiAura Shop*\n\n` +
-        `*Order ID:* ${newOrderId}\n\n` +
-        `*Customer Details:*\n` +
-        `Name: ${data.fullName}\n` +
-        `Phone: ${data.phone}\n` +
-        `Email: ${data.email}\n\n` +
-        `*Shipping Address:*\n` +
-        `${data.address}\n` +
-        `${data.city}, ${data.state} - ${data.postalCode}\n\n` +
-        `*Order Items:*\n${orderItems}\n\n` +
-        `*Subtotal:* ₹${subtotal.toFixed(0)}\n` +
-        `*Shipping:* ${shipping === 0 ? 'FREE' : `₹${shipping}`}\n` +
-        `*Total:* ₹${total.toFixed(0)}\n\n` +
-        `*Payment Method:* Cash on Delivery`;
+      // If WhatsApp payment, redirect to WhatsApp for payment
+      if (data.paymentMethod === "whatsapp") {
+        const orderItems = cart.cartItems.map(item => 
+          `• ${item.productName} x${item.quantity} - ₹${(parseFloat(item.productPrice) * item.quantity).toFixed(0)}`
+        ).join('\n');
+        
+        const whatsappMessage = `Hi! I want to place an order and pay via WhatsApp.\n\n` +
+          `*Order ID:* ${newOrderId}\n\n` +
+          `*My Details:*\n` +
+          `Name: ${data.fullName}\n` +
+          `Phone: ${data.phone}\n\n` +
+          `*Shipping Address:*\n` +
+          `${data.address}\n` +
+          `${data.city}, ${data.state} - ${data.postalCode}\n\n` +
+          `*Order Items:*\n${orderItems}\n\n` +
+          `*Total Amount:* ₹${total.toFixed(0)}\n\n` +
+          `Please share payment details.`;
 
-      const whatsappUrl = `https://wa.me/918121503307?text=${encodeURIComponent(whatsappMessage)}`;
+        const whatsappUrl = `https://wa.me/918121503307?text=${encodeURIComponent(whatsappMessage)}`;
+        window.open(whatsappUrl, '_blank');
+      }
 
       if (cart.clearCart) {
         cart.clearCart();
@@ -132,12 +136,11 @@ export default function CheckoutPage() {
       
       setOrderPlaced(true);
       
-      // Open WhatsApp
-      window.open(whatsappUrl, '_blank');
-      
       toast({
         title: "Order Placed Successfully! 🎉",
-        description: `Your order has been confirmed. Redirecting to WhatsApp...`,
+        description: data.paymentMethod === "whatsapp" 
+          ? "Redirecting to WhatsApp for payment..." 
+          : "Your order has been confirmed.",
       });
 
     } catch (err: any) {
@@ -346,30 +349,74 @@ export default function CheckoutPage() {
                     <CardTitle className="font-serif text-xl">Payment Method</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex items-center space-x-3 border rounded-lg p-4 bg-green-50 border-green-200">
-                      <Banknote className="h-6 w-6 text-green-600" />
-                      <div>
-                        <p className="font-medium text-green-800">Cash on Delivery</p>
-                        <p className="text-sm text-green-600">Pay when you receive your order</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex items-center space-x-3 border rounded-lg p-4 bg-emerald-50 border-emerald-200">
-                      <MessageCircle className="h-6 w-6 text-emerald-600" />
-                      <div>
-                        <p className="font-medium text-emerald-800">WhatsApp Confirmation</p>
-                        <p className="text-sm text-emerald-600">Order details will be sent to WhatsApp</p>
-                      </div>
-                    </div>
+                    <FormField
+                      control={form.control}
+                      name="paymentMethod"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <RadioGroup
+                              value={field.value}
+                              onValueChange={field.onChange}
+                              className="space-y-4"
+                            >
+                              <div className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer transition-colors ${
+                                field.value === "cod" 
+                                  ? "bg-green-50 border-green-400 ring-2 ring-green-400" 
+                                  : "bg-gray-50 border-gray-200 hover:border-green-300"
+                              }`}>
+                                <RadioGroupItem value="cod" id="cod" className="text-green-600" />
+                                <Banknote className={`h-6 w-6 ${field.value === "cod" ? "text-green-600" : "text-gray-500"}`} />
+                                <Label htmlFor="cod" className="flex-1 cursor-pointer">
+                                  <p className={`font-medium ${field.value === "cod" ? "text-green-800" : "text-gray-700"}`}>
+                                    Cash on Delivery
+                                  </p>
+                                  <p className={`text-sm ${field.value === "cod" ? "text-green-600" : "text-gray-500"}`}>
+                                    Pay when you receive your order
+                                  </p>
+                                </Label>
+                              </div>
+                              
+                              <div className={`flex items-center space-x-3 border rounded-lg p-4 cursor-pointer transition-colors ${
+                                field.value === "whatsapp" 
+                                  ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-400" 
+                                  : "bg-gray-50 border-gray-200 hover:border-emerald-300"
+                              }`}>
+                                <RadioGroupItem value="whatsapp" id="whatsapp" className="text-emerald-600" />
+                                <MessageCircle className={`h-6 w-6 ${field.value === "whatsapp" ? "text-emerald-600" : "text-gray-500"}`} />
+                                <Label htmlFor="whatsapp" className="flex-1 cursor-pointer">
+                                  <p className={`font-medium ${field.value === "whatsapp" ? "text-emerald-800" : "text-gray-700"}`}>
+                                    Pay via WhatsApp
+                                  </p>
+                                  <p className={`text-sm ${field.value === "whatsapp" ? "text-emerald-600" : "text-gray-500"}`}>
+                                    Make payment through WhatsApp chat
+                                  </p>
+                                </Label>
+                              </div>
+                            </RadioGroup>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   </CardContent>
                 </Card>
 
                 <Button
                   type="submit"
                   size="lg"
-                  className="w-full hover-elevate active-elevate-2"
+                  className={`w-full hover-elevate active-elevate-2 ${
+                    form.watch("paymentMethod") === "whatsapp" 
+                      ? "bg-emerald-600 hover:bg-emerald-700" 
+                      : ""
+                  }`}
                   disabled={isProcessing}
                 >
-                  {isProcessing ? "Processing..." : `Place Order • ₹${total.toFixed(0)}`}
+                  {isProcessing ? "Processing..." : (
+                    form.watch("paymentMethod") === "whatsapp"
+                      ? `Pay via WhatsApp • ₹${total.toFixed(0)}`
+                      : `Place Order (COD) • ₹${total.toFixed(0)}`
+                  )}
                 </Button>
               </form>
             </Form>
