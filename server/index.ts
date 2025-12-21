@@ -1,8 +1,25 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import cors from "cors";
 
 const app = express();
+
+// CORS configuration for frontend on different domain
+app.use(cors({
+  origin: [
+    "http://localhost:5500",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://raiaura.in",
+    "https://www.raiaura.in",
+    "https://raiaurashop.netlify.app",
+  ],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
