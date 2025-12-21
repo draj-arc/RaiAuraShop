@@ -485,6 +485,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Check if email already exists
+  app.post("/api/auth/check-email", async (req, res) => {
+    try {
+      const { email } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+
+      const existingUser = await storage.getUserByEmail(email);
+      res.json({ exists: !!existingUser });
+    } catch (error: any) {
+      console.error("Check email error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Firebase Email Link Auth endpoint
   app.post("/api/auth/firebase-email", async (req, res) => {
     try {
@@ -495,6 +512,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       let user = await storage.getUserByEmail(email);
+      
+      // If this is a signup attempt and user already exists, reject it
+      if (isNewUser && user) {
+        return res.status(400).json({ 
+          message: "An account with this email already exists. Please sign in instead." 
+        });
+      }
       
       if (!user) {
         // Create new user from Firebase email link auth

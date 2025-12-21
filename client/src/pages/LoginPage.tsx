@@ -166,6 +166,20 @@ export default function LoginPage() {
   const handleSignUp = async (data: z.infer<typeof signUpEmailSchema>) => {
     setIsLoading(true);
     try {
+      // First check if email already exists
+      const checkRes = await apiRequest("POST", "/api/auth/check-email", { email: data.email });
+      const checkData = await checkRes.json();
+      
+      if (checkData.exists) {
+        toast({
+          title: "Account already exists",
+          description: "An account with this email already exists. Please sign in instead.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
+      
       window.localStorage.setItem('signupData', JSON.stringify({
         username: data.username,
         email: data.email,
