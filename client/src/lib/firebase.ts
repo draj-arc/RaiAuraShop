@@ -24,8 +24,8 @@ export const googleProvider = new GoogleAuthProvider();
 
 // Email Link Authentication settings
 const actionCodeSettings = {
-  // URL to redirect to after email link is clicked
-  url: 'https://raiaurashop-1.onrender.com/login',
+  // URL to redirect to after email link is clicked - use current origin for flexibility
+  url: typeof window !== 'undefined' ? window.location.origin + '/login' : 'https://raiaura.in/login',
   handleCodeInApp: true,
 };
 
