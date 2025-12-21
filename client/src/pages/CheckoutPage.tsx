@@ -6,12 +6,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { useState, useContext } from "react";
+import { useState, useContext, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { CartContext } from "@/App";
-import { useLocation } from "wouter";
-import { Banknote, CheckCircle, ShoppingBag, MessageCircle } from "lucide-react";
+import { useLocation, Link } from "wouter";
+import { Banknote, CheckCircle, ShoppingBag, MessageCircle, LogIn } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 
@@ -29,6 +29,26 @@ const checkoutSchema = z.object({
 
 type CheckoutFormData = z.infer<typeof checkoutSchema>;
 
+// Helper to check if user is logged in
+function isUserLoggedIn(): boolean {
+  const token = localStorage.getItem("token");
+  const user = localStorage.getItem("user");
+  return !!(token && user);
+}
+
+// Helper to get current user
+function getCurrentUser(): { id: string; email: string; username: string } | null {
+  const userStr = localStorage.getItem("user");
+  if (userStr) {
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export default function CheckoutPage() {
   const { toast } = useToast();
   const cart = useContext(CartContext);
@@ -36,12 +56,24 @@ export default function CheckoutPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [orderId, setOrderId] = useState("");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; username: string } | null>(null);
+
+  // Check authentication on mount
+  useEffect(() => {
+    const loggedIn = isUserLoggedIn();
+    setIsLoggedIn(loggedIn);
+    if (loggedIn) {
+      const user = getCurrentUser();
+      setCurrentUser(user);
+    }
+  }, []);
 
   const form = useForm<CheckoutFormData>({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
-      email: "",
-      fullName: "",
+      email: currentUser?.email || "",
+      fullName: currentUser?.username || "",
       phone: "",
       address: "",
       city: "",
@@ -201,6 +233,33 @@ export default function CheckoutPage() {
           <Button onClick={() => setLocation("/shop")} className="hover-elevate">
             Shop Now
           </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  // Not logged in - show login prompt
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen py-12 md:py-20 flex items-center justify-center">
+        <Card className="p-8 max-w-md text-center">
+          <LogIn className="h-16 w-16 text-primary mx-auto mb-4" />
+          <h2 className="font-serif text-2xl mb-2">Sign In Required</h2>
+          <p className="text-muted-foreground mb-6">
+            Please sign in to complete your order. Your cart items will be saved.
+          </p>
+          <Link href="/login">
+            <Button className="hover-elevate w-full">
+              <LogIn className="mr-2 h-4 w-4" />
+              Sign In to Continue
+            </Button>
+          </Link>
+          <p className="text-sm text-muted-foreground mt-4">
+            Don't have an account?{" "}
+            <Link href="/login" className="text-primary hover:underline">
+              Create one for free
+            </Link>
+          </p>
         </Card>
       </div>
     );

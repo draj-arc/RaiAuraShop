@@ -10,22 +10,63 @@ interface CartItem {
   quantity: number;
 }
 
+// Helper to check if user is logged in
+function isUserLoggedIn(): boolean {
+  const token = localStorage.getItem("token");
+  const user = localStorage.getItem("user");
+  return !!(token && user);
+}
+
+// Helper to get current user
+function getCurrentUser(): { id: string; email: string; username: string } | null {
+  const userStr = localStorage.getItem("user");
+  if (userStr) {
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function useCart() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedCart = localStorage.getItem("cart");
-    if (savedCart) {
-      setCartItems(JSON.parse(savedCart));
+    // Load cart for the current user only
+    const user = getCurrentUser();
+    if (user) {
+      const savedCart = localStorage.getItem(`cart_${user.id}`);
+      if (savedCart) {
+        setCartItems(JSON.parse(savedCart));
+      }
+    } else {
+      // Clear cart if not logged in
+      setCartItems([]);
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("cart", JSON.stringify(cartItems));
+    // Save cart for the current user
+    const user = getCurrentUser();
+    if (user && cartItems.length >= 0) {
+      localStorage.setItem(`cart_${user.id}`, JSON.stringify(cartItems));
+    }
   }, [cartItems]);
 
-  const addToCart = (product: { id: string; name: string; price: string; image: string }) => {
+  const addToCart = (product: { id: string; name: string; price: string; image: string }): boolean => {
+    // Check if user is logged in
+    if (!isUserLoggedIn()) {
+      toast({
+        title: "Please sign in",
+        description: "You need to sign in to add items to your cart",
+        variant: "destructive",
+      });
+      return false;
+    }
+
     setCartItems((items) => {
       const existing = items.find((item) => item.productId === product.id);
       
@@ -58,6 +99,7 @@ export function useCart() {
         },
       ];
     });
+    return true;
   };
 
   const updateQuantity = (itemId: string, quantity: number) => {

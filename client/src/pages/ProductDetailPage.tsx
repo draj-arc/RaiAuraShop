@@ -1,4 +1,4 @@
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Product } from "@shared/schema";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { CartContext } from "@/App";
 
 export default function ProductDetailPage() {
   const [, params] = useRoute("/product/:slug");
+  const [, setLocation] = useLocation();
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const cart = useContext(CartContext);
@@ -135,13 +136,22 @@ export default function ProductDetailPage() {
               disabled={product.stock === 0}
               onClick={() => {
                 if (cart) {
+                  let success = true;
                   for (let i = 0; i < quantity; i++) {
-                    cart.addToCart({
+                    const result = cart.addToCart({
                       id: product.id,
                       name: product.name,
                       price: product.price,
                       image: product.images?.[0] || "",
                     });
+                    if (result === false) {
+                      success = false;
+                      break;
+                    }
+                  }
+                  // Redirect to login if not logged in
+                  if (!success) {
+                    setLocation("/login");
                   }
                 }
               }}

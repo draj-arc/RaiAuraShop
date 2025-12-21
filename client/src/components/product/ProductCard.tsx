@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ShoppingCart } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useContext } from "react";
 import { CartContext } from "@/App";
 
@@ -15,10 +15,15 @@ interface ProductCardProps {
 
 export function ProductCard({ id, name, price, image, slug }: ProductCardProps) {
   const cart = useContext(CartContext);
+  const [, setLocation] = useLocation();
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
-    cart?.addToCart({ id, name, price, image });
+    const success = cart?.addToCart({ id, name, price, image });
+    // If addToCart returns false, user is not logged in - redirect to login
+    if (success === false) {
+      setLocation("/login");
+    }
   };
 
   return (
