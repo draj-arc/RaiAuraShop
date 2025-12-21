@@ -561,6 +561,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
+  // Wishlist API endpoints
+  app.get("/api/wishlist/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const wishlistItems = await storage.getWishlist(userId);
+      
+      // Get product details for each wishlist item
+      const itemsWithProducts = await Promise.all(
+        wishlistItems.map(async (item) => {
+          const product = await storage.getProductById(item.productId);
+          return {
+            ...item,
+            product
+          };
+        })
+      );
+      
+      res.json(itemsWithProducts);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/wishlist", async (req, res) => {
+    try {
+      const { userId, productId } = req.body;
+      
+      if (!userId || !productId) {
+        return res.status(400).json({ message: "User ID and Product ID are required" });
+      }
+
+      const wishlistItem = await storage.addToWishlist(userId, productId);
+      res.json(wishlistItem);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/wishlist/:userId/:productId", async (req, res) => {
+    try {
+      const { userId, productId } = req.params;
+      await storage.removeFromWishlist(userId, productId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/wishlist/:userId/check/:productId", async (req, res) => {
+    try {
+      const { userId, productId } = req.params;
+      const isInWishlist = await storage.isInWishlist(userId, productId);
+      res.json({ isInWishlist });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

@@ -73,6 +73,13 @@ export const orderItems = pgTable("order_items", {
   quantity: integer("quantity").notNull(),
 });
 
+export const wishlistItems = pgTable("wishlist_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  productId: varchar("product_id").notNull().references(() => products.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const productsRelations = relations(products, ({ one, many }) => ({
   category: one(categories, {
     fields: [products.categoryId],
@@ -112,6 +119,17 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   }),
   product: one(products, {
     fields: [orderItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const wishlistItemsRelations = relations(wishlistItems, ({ one }) => ({
+  user: one(users, {
+    fields: [wishlistItems.userId],
+    references: [users.id],
+  }),
+  product: one(products, {
+    fields: [wishlistItems.productId],
     references: [products.id],
   }),
 }));
@@ -178,3 +196,5 @@ export type CartItem = typeof cartItems.$inferSelect;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+
+export type WishlistItem = typeof wishlistItems.$inferSelect;
