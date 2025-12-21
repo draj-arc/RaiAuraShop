@@ -5,6 +5,7 @@ import { insertProductSchema, insertCategorySchema, insertCartItemSchema, insert
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Stripe from "stripe";
+import { sendOTPEmail, sendOrderConfirmationEmail } from "./email";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "dev-secret-key-change-in-production";
 
@@ -334,14 +335,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store OTP
       otpStore.set(email, { otp, expiresAt, isNewUser, username });
       
-      // In production, send OTP via email service (SendGrid, Resend, etc.)
-      // For now, we'll log it and return success
+      // Send OTP via email
+      const emailSent = await sendOTPEmail(email, otp);
+      
+      // Log OTP for development/debugging
       console.log(`\n📧 OTP for ${email}: ${otp}\n`);
       
       res.json({ 
-        message: "OTP sent successfully",
-        // Remove this in production - only for demo purposes
-        demo_otp: otp 
+        message: emailSent ? "OTP sent to your email" : "OTP generated (check console)",
+        // Include demo_otp only in development for testing
+        demo_otp: process.env.NODE_ENV === 'production' ? undefined : otp 
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -438,6 +441,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
         token 
       });
     } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Phone Auth endpoint (Firebase SMS verification)
+  app.post("/api/auth/phone", async (req, res) => {
+    try {
+      const { phone, username, firebaseUid } = req.body;
+      
+      if (!phone || !firebaseUid) {
+        return res.status(400).json({ message: "Phone and Firebase UID are required" });
+      }
+
+      // Use phone number as a unique identifier - create email-like identifier
+      const phoneEmail = `${phone.replace(/\+/g, '').replace(/\s/g, '')}@phone.raiaurashop.com`;
+      
+      let user = await storage.getUserByEmail(phoneEmail);
+      
+      if (!user) {
+        // Create new user from phone auth
+        const randomPassword = Math.random().toString(36).slice(-12);
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        
+        user = await storage.createUser({
+          username: username || `User_${phone.slice(-4)}`,
+          email: phoneEmail,
+          password: hashedPassword,
+        });
+        
+        console.log(`✅ New phone user created: ${phone}`);
+      }
+
+      const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
+      
+      res.json({ 
+        user: { id: user.id, username: user.username, email: user.email, phone, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
+        token 
+      });
+    } catch (error: any) {
+      console.error("Phone auth error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Firebase Email Link Auth endpoint
+  app.post("/api/auth/firebase-email", async (req, res) => {
+    try {
+      const { email, username, firebaseUid, isNewUser } = req.body;
+      
+      if (!email || !firebaseUid) {
+        return res.status(400).json({ message: "Email and Firebase UID are required" });
+      }
+
+      let user = await storage.getUserByEmail(email);
+      
+      if (!user) {
+        // Create new user from Firebase email link auth
+        const randomPassword = Math.random().toString(36).slice(-12);
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        
+        user = await storage.createUser({
+          username: username || email.split('@')[0],
+          email,
+          password: hashedPassword,
+        });
+        
+        console.log(`✅ New Firebase email user created: ${email}`);
+      }
+
+      const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
+      
+      res.json({ 
+        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
+        token 
+      });
+    } catch (error: any) {
+      console.error("Firebase email auth error:", error);
       res.status(500).json({ message: error.message });
     }
   });

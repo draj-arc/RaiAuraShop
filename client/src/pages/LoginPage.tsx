@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,47 +6,40 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { insertUserSchema, loginUserSchema } from "@shared/schema";
+import { loginUserSchema } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, Link } from "wouter";
 import { z } from "zod";
-import { Mail, Lock, User, Sparkles, ArrowLeft, KeyRound } from "lucide-react";
+import { Mail, Lock, User, Sparkles, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { apiRequest } from "@/lib/queryClient";
 import { Separator } from "@/components/ui/separator";
 import { signInWithPopup } from "firebase/auth";
-import { auth, googleProvider } from "@/lib/firebase";
+import { auth, googleProvider, sendEmailLink, isEmailLink, completeEmailSignIn } from "@/lib/firebase";
 
-// OTP Schema
-const otpRequestSchema = z.object({
+// Email Link Schema
+const emailLinkSchema = z.object({
   email: z.string().email("Please enter a valid email"),
 });
 
-const otpVerifySchema = z.object({
-  email: z.string().email(),
-  otp: z.string().length(6, "OTP must be 6 digits"),
-});
-
-const signupOtpRequestSchema = z.object({
+const signupEmailSchema = z.object({
   username: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Please enter a valid email"),
 });
 
-type LoginMethod = "password" | "otp";
-type OTPStep = "request" | "verify";
-type SignupStep = "form" | "otp";
+type LoginMethod = "password" | "emailLink";
+type EmailLinkStep = "request" | "sent";
+type SignupStep = "form" | "sent";
 
 export default function LoginPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [loginMethod, setLoginMethod] = useState<LoginMethod>("password");
-  const [otpStep, setOtpStep] = useState<OTPStep>("request");
-  const [otpEmail, setOtpEmail] = useState("");
+  const [emailLinkStep, setEmailLinkStep] = useState<EmailLinkStep>("request");
+  const [emailForLink, setEmailForLink] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [signupStep, setSignupStep] = useState<SignupStep>("form");
   const [signupData, setSignupData] = useState({ username: "", email: "" });
-  const [demoOtp, setDemoOtp] = useState<string | null>(null);
 
   const loginForm = useForm({
     resolver: zodResolver(loginUserSchema),
@@ -57,35 +50,98 @@ export default function LoginPage() {
   });
 
   const signupForm = useForm({
-    resolver: zodResolver(signupOtpRequestSchema),
+    resolver: zodResolver(signupEmailSchema),
     defaultValues: {
       username: "",
       email: "",
     },
   });
 
-  const signupOtpForm = useForm({
-    resolver: zodResolver(otpVerifySchema),
-    defaultValues: {
-      email: "",
-      otp: "",
-    },
-  });
-
-  const otpRequestForm = useForm({
-    resolver: zodResolver(otpRequestSchema),
+  const emailLinkForm = useForm({
+    resolver: zodResolver(emailLinkSchema),
     defaultValues: {
       email: "",
     },
   });
 
-  const otpVerifyForm = useForm({
-    resolver: zodResolver(otpVerifySchema),
-    defaultValues: {
-      email: "",
-      otp: "",
-    },
-  });
+  // Handle email link sign-in when page loads (after user clicks the link in email)
+  useEffect(() => {
+    const handleEmailLinkSignIn = async () => {
+      if (isEmailLink(window.location.href)) {
+        setIsLoading(true);
+        // Get the email from localStorage (saved when we sent the link)
+        let email = window.localStorage.getItem('emailForSignIn');
+        
+        if (!email) {
+          // If email is not in localStorage, ask the user for it
+          email = window.prompt('Please provide your email for confirmation');
+        }
+        
+        if (email) {
+          try {
+            const result = await completeEmailSignIn(email, window.location.href);
+            const user = result.user;
+            
+            // Get stored signup data if this was a new user
+            const storedSignupData = window.localStorage.getItem('signupData');
+            const isNewUser = storedSignupData !== null;
+            const parsedSignupData = storedSignupData ? JSON.parse(storedSignupData) : null;
+            
+            // Send to our backend to create/login user
+            const res = await apiRequest("POST", "/api/auth/firebase-email", {
+              email: user.email,
+              username: parsedSignupData?.username || user.email?.split('@')[0],
+              firebaseUid: user.uid,
+              isNewUser,
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+              localStorage.setItem("token", data.token);
+              localStorage.setItem("user", JSON.stringify(data.user));
+              // Clean up
+              window.localStorage.removeItem('signupData');
+              
+              toast({
+                title: isNewUser ? "Account Created!" : "Welcome back!",
+                description: isNewUser 
+                  ? "Your account has been created successfully."
+                  : "You have been logged in successfully.",
+              });
+              
+              // Clear the URL parameters
+              window.history.replaceState({}, document.title, window.location.pathname);
+              setLocation("/dashboard");
+            } else {
+              toast({
+                title: "Error",
+                description: data.message || "Could not complete sign in",
+                variant: "destructive",
+              });
+            }
+          } catch (error: any) {
+            console.error("Email link sign-in error:", error);
+            let errorMessage = "Could not complete sign in. The link may have expired.";
+            
+            if (error.code === "auth/invalid-action-code") {
+              errorMessage = "This sign-in link has expired or already been used. Please request a new one.";
+            } else if (error.code === "auth/expired-action-code") {
+              errorMessage = "This sign-in link has expired. Please request a new one.";
+            }
+            
+            toast({
+              title: "Sign In Failed",
+              description: errorMessage,
+              variant: "destructive",
+            });
+          }
+        }
+        setIsLoading(false);
+      }
+    };
+    
+    handleEmailLinkSignIn();
+  }, []);
 
   const handleLogin = async (data: z.infer<typeof loginUserSchema>) => {
     setIsLoading(true);
@@ -119,108 +175,38 @@ export default function LoginPage() {
     }
   };
 
-  const handleSignup = async (data: z.infer<typeof signupOtpRequestSchema>) => {
+  const handleSignup = async (data: z.infer<typeof signupEmailSchema>) => {
     setIsLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/otp/request", {
-        email: data.email,
-        isNewUser: true,
+      // Store signup data for when user clicks the email link
+      window.localStorage.setItem('signupData', JSON.stringify({
         username: data.username,
-      });
-      const result = await res.json();
-      
-      if (res.ok) {
-        setSignupData({ username: data.username, email: data.email });
-        signupOtpForm.setValue("email", data.email);
-        setSignupStep("otp");
-        setDemoOtp(result.demo_otp || null);
-        toast({
-          title: "OTP Sent!",
-          description: `A 6-digit verification code has been sent to ${data.email}`,
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: result.message || "Could not send OTP",
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: "Something went wrong. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSignupVerifyOTP = async (data: z.infer<typeof otpVerifySchema>) => {
-    setIsLoading(true);
-    try {
-      const res = await apiRequest("POST", "/api/otp/verify", {
-        email: signupData.email,
-        otp: data.otp,
-      });
-      const result = await res.json();
-      
-      if (res.ok) {
-        localStorage.setItem("token", result.token);
-        localStorage.setItem("user", JSON.stringify(result.user));
-        toast({
-          title: "Account Created!",
-          description: "Welcome to Rai Aura. Your account has been created successfully.",
-        });
-        setLocation("/dashboard");
-      } else {
-        toast({
-          title: "Verification Failed",
-          description: result.message || "Invalid OTP",
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: "Something went wrong. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRequestOTP = async (data: z.infer<typeof otpRequestSchema>) => {
-    setIsLoading(true);
-    try {
-      const res = await apiRequest("POST", "/api/otp/request", {
         email: data.email,
-        isNewUser: false,
-      });
-      const result = await res.json();
+      }));
       
-      if (res.ok) {
-        setOtpEmail(data.email);
-        otpVerifyForm.setValue("email", data.email);
-        setOtpStep("verify");
-        setDemoOtp(result.demo_otp || null);
-        
-        toast({
-          title: "OTP Sent!",
-          description: `A 6-digit code has been sent to ${data.email}`,
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: result.message || "Could not send OTP",
-          variant: "destructive",
-        });
+      // Send Firebase email link
+      await sendEmailLink(data.email);
+      
+      setSignupData({ username: data.username, email: data.email });
+      setSignupStep("sent");
+      
+      toast({
+        title: "Check your email!",
+        description: `We've sent a sign-in link to ${data.email}. Click the link to complete your registration.`,
+      });
+    } catch (error: any) {
+      console.error("Send email link error:", error);
+      let errorMessage = "Could not send sign-in link. Please try again.";
+      
+      if (error.code === "auth/invalid-email") {
+        errorMessage = "Please enter a valid email address.";
+      } else if (error.code === "auth/quota-exceeded") {
+        errorMessage = "Too many requests. Please try again later.";
       }
-    } catch (error) {
+      
       toast({
         title: "Error",
-        description: "Could not send OTP. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -228,34 +214,32 @@ export default function LoginPage() {
     }
   };
 
-  const handleVerifyOTP = async (data: z.infer<typeof otpVerifySchema>) => {
+  const handleSendEmailLink = async (data: z.infer<typeof emailLinkSchema>) => {
     setIsLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/otp/verify", {
-        email: otpEmail,
-        otp: data.otp,
-      });
-      const result = await res.json();
+      // Send Firebase email link for login
+      await sendEmailLink(data.email);
       
-      if (res.ok) {
-        localStorage.setItem("token", result.token);
-        localStorage.setItem("user", JSON.stringify(result.user));
-        toast({
-          title: "Welcome!",
-          description: "You have been logged in successfully.",
-        });
-        setLocation("/dashboard");
-      } else {
-        toast({
-          title: "Invalid OTP",
-          description: result.message || "The code you entered is incorrect.",
-          variant: "destructive",
-        });
+      setEmailForLink(data.email);
+      setEmailLinkStep("sent");
+      
+      toast({
+        title: "Check your email!",
+        description: `We've sent a sign-in link to ${data.email}. Click the link to sign in.`,
+      });
+    } catch (error: any) {
+      console.error("Send email link error:", error);
+      let errorMessage = "Could not send sign-in link. Please try again.";
+      
+      if (error.code === "auth/invalid-email") {
+        errorMessage = "Please enter a valid email address.";
+      } else if (error.code === "auth/quota-exceeded") {
+        errorMessage = "Too many requests. Please try again later.";
       }
-    } catch (error) {
+      
       toast({
         title: "Error",
-        description: "Verification failed. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -263,20 +247,17 @@ export default function LoginPage() {
     }
   };
 
-  const resetOTPFlow = () => {
-    setOtpStep("request");
-    setOtpEmail("");
-    setDemoOtp(null);
-    otpRequestForm.reset();
-    otpVerifyForm.reset();
+  const resetEmailLinkFlow = () => {
+    setEmailLinkStep("request");
+    setEmailForLink("");
+    emailLinkForm.reset();
   };
 
   const resetSignupFlow = () => {
     setSignupStep("form");
     setSignupData({ username: "", email: "" });
-    setDemoOtp(null);
     signupForm.reset();
-    signupOtpForm.reset();
+    window.localStorage.removeItem('signupData');
   };
 
   const handleGoogleSignIn = async () => {
@@ -311,9 +292,42 @@ export default function LoginPage() {
       }
     } catch (error: any) {
       console.error("Google sign-in error:", error);
+      
+      let errorMessage = "Could not sign in with Google. Please try again.";
+      if (error.code === "auth/popup-closed-by-user") {
+        errorMessage = "Sign-in popup was closed. Please try again.";
+      } else if (error.code === "auth/popup-blocked") {
+        errorMessage = "Popup was blocked. Please allow popups for this site.";
+      } else if (error.code === "auth/unauthorized-domain") {
+        errorMessage = "This domain is not authorized for Google Sign-In. Please add localhost to Firebase authorized domains.";
+      } else if (error.code === "auth/network-request-failed") {
+        errorMessage = "Network error. Please check your connection.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       toast({
         title: "Sign In Failed",
-        description: error.message || "Could not sign in with Google. Please try again.",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resendEmailLink = async (email: string) => {
+    setIsLoading(true);
+    try {
+      await sendEmailLink(email);
+      toast({
+        title: "Email sent!",
+        description: `We've sent another sign-in link to ${email}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Could not resend email. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -329,54 +343,58 @@ export default function LoginPage() {
       
       <Card className="w-full max-w-md relative overflow-hidden">
         {/* Decorative corner accent */}
-        <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-bl from-primary/10 to-transparent" />
+        <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-primary/20 to-transparent" />
         
-        <CardHeader className="text-center pb-2">
-          <div className="flex justify-center mb-4">
+        <CardHeader className="text-center space-y-4">
+          <Link href="/" className="flex justify-center">
             <Logo size="lg" />
+          </Link>
+          <div>
+            <CardTitle className="text-2xl font-serif flex items-center justify-center gap-2">
+              Welcome to Rai Aura
+              <Sparkles className="h-5 w-5 text-primary" />
+            </CardTitle>
+            <CardDescription className="mt-2">
+              Sign in to access your account
+            </CardDescription>
           </div>
-          <CardTitle className="font-serif text-2xl">Welcome Back</CardTitle>
-          <CardDescription>
-            Sign in to your account or create a new one
-          </CardDescription>
         </CardHeader>
-        
+
         <CardContent>
           <Tabs defaultValue="login" className="w-full">
             <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="login" data-testid="tab-login">Sign In</TabsTrigger>
-              <TabsTrigger value="signup" data-testid="tab-signup">Sign Up</TabsTrigger>
+              <TabsTrigger value="login">Sign In</TabsTrigger>
+              <TabsTrigger value="signup">Create Account</TabsTrigger>
             </TabsList>
-            
+
+            {/* LOGIN TAB */}
             <TabsContent value="login" className="space-y-4">
               {/* Login Method Toggle */}
-              <div className="flex gap-2 p-1 bg-muted rounded-lg">
+              <div className="flex gap-2 mb-4">
                 <Button
                   type="button"
-                  variant={loginMethod === "password" ? "default" : "ghost"}
+                  variant={loginMethod === "password" ? "default" : "outline"}
                   size="sm"
+                  onClick={() => { setLoginMethod("password"); resetEmailLinkFlow(); }}
                   className="flex-1"
-                  onClick={() => {
-                    setLoginMethod("password");
-                    resetOTPFlow();
-                  }}
                 >
-                  <Lock className="h-4 w-4 mr-2" />
+                  <Lock className="h-4 w-4 mr-1" />
                   Password
                 </Button>
                 <Button
                   type="button"
-                  variant={loginMethod === "otp" ? "default" : "ghost"}
+                  variant={loginMethod === "emailLink" ? "default" : "outline"}
                   size="sm"
+                  onClick={() => { setLoginMethod("emailLink"); loginForm.reset(); }}
                   className="flex-1"
-                  onClick={() => setLoginMethod("otp")}
                 >
-                  <KeyRound className="h-4 w-4 mr-2" />
-                  Email OTP
+                  <Mail className="h-4 w-4 mr-1" />
+                  Email Link
                 </Button>
               </div>
 
-              {loginMethod === "password" ? (
+              {/* Password Login */}
+              {loginMethod === "password" && (
                 <Form {...loginForm}>
                   <form onSubmit={loginForm.handleSubmit(handleLogin)} className="space-y-4">
                     <FormField
@@ -387,8 +405,8 @@ export default function LoginPage() {
                           <FormLabel>Email</FormLabel>
                           <FormControl>
                             <div className="relative">
-                              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                              <Input {...field} type="email" className="pl-10" placeholder="you@example.com" data-testid="input-login-email" />
+                              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input {...field} type="email" placeholder="your@email.com" className="pl-10" />
                             </div>
                           </FormControl>
                           <FormMessage />
@@ -403,198 +421,119 @@ export default function LoginPage() {
                           <FormLabel>Password</FormLabel>
                           <FormControl>
                             <div className="relative">
-                              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                              <Input {...field} type="password" className="pl-10" placeholder="••••••••" data-testid="input-login-password" />
+                              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input {...field} type="password" placeholder="••••••••" className="pl-10" />
                             </div>
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    <Button type="submit" className="w-full hover-elevate active-elevate-2" disabled={isLoading} data-testid="button-login">
-                      {isLoading ? (
-                        <span className="flex items-center">
-                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                          Signing in...
-                        </span>
-                      ) : (
-                        <>
-                          <Sparkles className="mr-2 h-4 w-4" />
-                          Sign In
-                        </>
-                      )}
+                    <Button type="submit" className="w-full luxury-button" disabled={isLoading}>
+                      {isLoading ? "Signing In..." : "Sign In"}
                     </Button>
                   </form>
                 </Form>
-              ) : (
-                /* OTP Login Flow */
-                <div className="space-y-4">
-                  {otpStep === "request" ? (
-                    <Form {...otpRequestForm}>
-                      <form onSubmit={otpRequestForm.handleSubmit(handleRequestOTP)} className="space-y-4">
+              )}
+
+              {/* Email Link Login */}
+              {loginMethod === "emailLink" && (
+                <>
+                  {emailLinkStep === "request" && (
+                    <Form {...emailLinkForm}>
+                      <form onSubmit={emailLinkForm.handleSubmit(handleSendEmailLink)} className="space-y-4">
                         <FormField
-                          control={otpRequestForm.control}
+                          control={emailLinkForm.control}
                           name="email"
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Email Address</FormLabel>
                               <FormControl>
                                 <div className="relative">
-                                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                  <Input {...field} type="email" className="pl-10" placeholder="you@example.com" />
+                                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                  <Input {...field} type="email" placeholder="your@email.com" className="pl-10" />
                                 </div>
                               </FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
-                        <p className="text-sm text-muted-foreground">
-                          We'll send a 6-digit verification code to your email.
-                        </p>
-                        <Button type="submit" className="w-full hover-elevate active-elevate-2" disabled={isLoading}>
-                          {isLoading ? (
-                            <span className="flex items-center">
-                              <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                              </svg>
-                              Sending OTP...
-                            </span>
-                          ) : (
-                            <>
-                              <Mail className="mr-2 h-4 w-4" />
-                              Send OTP
-                            </>
-                          )}
+                        <Button type="submit" className="w-full luxury-button" disabled={isLoading}>
+                          {isLoading ? "Sending..." : "Send Sign-In Link"}
                         </Button>
-                      </form>
-                    </Form>
-                  ) : (
-                    <Form {...otpVerifyForm}>
-                      <form onSubmit={otpVerifyForm.handleSubmit(handleVerifyOTP)} className="space-y-4">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="mb-2 -ml-2"
-                          onClick={resetOTPFlow}
-                        >
-                          <ArrowLeft className="h-4 w-4 mr-1" />
-                          Back
-                        </Button>
-                        
-                        <div className="text-center space-y-2">
-                          <p className="text-sm text-muted-foreground">
-                            Enter the 6-digit code sent to
-                          </p>
-                          <p className="font-medium">{otpEmail}</p>
-                          {demoOtp && (
-                            <p className="text-xs text-primary bg-primary/10 px-3 py-1 rounded-full inline-block">
-                              Demo OTP: {demoOtp}
-                            </p>
-                          )}
-                        </div>
-                        
-                        <FormField
-                          control={otpVerifyForm.control}
-                          name="otp"
-                          render={({ field }) => (
-                            <FormItem className="flex flex-col items-center">
-                              <FormControl>
-                                <InputOTP maxLength={6} {...field}>
-                                  <InputOTPGroup>
-                                    <InputOTPSlot index={0} />
-                                    <InputOTPSlot index={1} />
-                                    <InputOTPSlot index={2} />
-                                    <InputOTPSlot index={3} />
-                                    <InputOTPSlot index={4} />
-                                    <InputOTPSlot index={5} />
-                                  </InputOTPGroup>
-                                </InputOTP>
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <Button type="submit" className="w-full hover-elevate active-elevate-2" disabled={isLoading}>
-                          {isLoading ? (
-                            <span className="flex items-center">
-                              <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                              </svg>
-                              Verifying...
-                            </span>
-                          ) : (
-                            <>
-                              <KeyRound className="mr-2 h-4 w-4" />
-                              Verify & Sign In
-                            </>
-                          )}
-                        </Button>
-                        
-                        <p className="text-center text-sm text-muted-foreground">
-                          Didn't receive the code?{" "}
-                          <button
-                            type="button"
-                            className="text-primary hover:underline"
-                            onClick={() => handleRequestOTP({ email: otpEmail })}
-                          >
-                            Resend
-                          </button>
+                        <p className="text-xs text-muted-foreground text-center">
+                          We'll send you a magic link to sign in instantly
                         </p>
                       </form>
                     </Form>
                   )}
-                </div>
+
+                  {emailLinkStep === "sent" && (
+                    <div className="text-center space-y-4 py-4">
+                      <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                        <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-lg">Check your email!</h3>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          We've sent a sign-in link to<br />
+                          <span className="font-medium text-foreground">{emailForLink}</span>
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Click the link in the email to sign in. The link will expire in 1 hour.
+                      </p>
+                      <div className="space-y-2 pt-2">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => resendEmailLink(emailForLink)} 
+                          disabled={isLoading}
+                          className="w-full"
+                        >
+                          {isLoading ? "Sending..." : "Resend Email"}
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          onClick={resetEmailLinkFlow} 
+                          className="w-full"
+                        >
+                          <ArrowLeft className="h-4 w-4 mr-2" />
+                          Use different email
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
-              {/* Google Sign In for Login */}
-              <div className="mt-6">
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <Separator className="w-full" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full mt-4 hover-elevate"
-                  onClick={handleGoogleSignIn}
-                  disabled={isLoading}
-                >
-                  <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-                    <path
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      fill="#4285F4"
-                    />
-                    <path
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      fill="#34A853"
-                    />
-                    <path
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                      fill="#FBBC05"
-                    />
-                    <path
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                      fill="#EA4335"
-                    />
-                  </svg>
-                  Continue with Google
-                </Button>
+              <div className="relative my-6">
+                <Separator />
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">
+                  or continue with
+                </span>
               </div>
+
+              {/* Google Sign In */}
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+              >
+                <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                Continue with Google
+              </Button>
             </TabsContent>
-            
-            <TabsContent value="signup">
-              {signupStep === "form" ? (
+
+            {/* SIGNUP TAB */}
+            <TabsContent value="signup" className="space-y-4">
+              {signupStep === "form" && (
                 <Form {...signupForm}>
                   <form onSubmit={signupForm.handleSubmit(handleSignup)} className="space-y-4">
                     <FormField
@@ -605,8 +544,8 @@ export default function LoginPage() {
                           <FormLabel>Full Name</FormLabel>
                           <FormControl>
                             <div className="relative">
-                              <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                              <Input {...field} className="pl-10" placeholder="Your name" data-testid="input-signup-username" />
+                              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input {...field} placeholder="Your name" className="pl-10" />
                             </div>
                           </FormControl>
                           <FormMessage />
@@ -621,167 +560,96 @@ export default function LoginPage() {
                           <FormLabel>Email</FormLabel>
                           <FormControl>
                             <div className="relative">
-                              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                              <Input {...field} type="email" className="pl-10" placeholder="you@example.com" data-testid="input-signup-email" />
+                              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input {...field} type="email" placeholder="your@email.com" className="pl-10" />
                             </div>
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    <p className="text-sm text-muted-foreground">
-                      We'll send a verification code to your email to complete signup.
-                    </p>
-                    <Button type="submit" className="w-full hover-elevate active-elevate-2" disabled={isLoading} data-testid="button-signup">
-                      {isLoading ? (
-                        <span className="flex items-center">
-                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                          Sending OTP...
-                        </span>
-                      ) : (
-                        <>
-                          <Mail className="mr-2 h-4 w-4" />
-                          Send Verification Code
-                        </>
-                      )}
+                    <Button type="submit" className="w-full luxury-button" disabled={isLoading}>
+                      {isLoading ? "Creating Account..." : "Create Account"}
                     </Button>
-                  </form>
-                </Form>
-              ) : (
-                <Form {...signupOtpForm}>
-                  <form onSubmit={signupOtpForm.handleSubmit(handleSignupVerifyOTP)} className="space-y-4">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="mb-2 -ml-2"
-                      onClick={resetSignupFlow}
-                    >
-                      <ArrowLeft className="h-4 w-4 mr-1" />
-                      Back
-                    </Button>
-                    
-                    <div className="text-center space-y-2">
-                      <p className="text-sm text-muted-foreground">
-                        Enter the 6-digit code sent to
-                      </p>
-                      <p className="font-medium">{signupData.email}</p>
-                      {demoOtp && (
-                        <p className="text-xs text-primary bg-primary/10 px-3 py-1 rounded-full inline-block">
-                          Demo OTP: {demoOtp}
-                        </p>
-                      )}
-                    </div>
-                    
-                    <FormField
-                      control={signupOtpForm.control}
-                      name="otp"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-col items-center">
-                          <FormControl>
-                            <InputOTP maxLength={6} {...field}>
-                              <InputOTPGroup>
-                                <InputOTPSlot index={0} />
-                                <InputOTPSlot index={1} />
-                                <InputOTPSlot index={2} />
-                                <InputOTPSlot index={3} />
-                                <InputOTPSlot index={4} />
-                                <InputOTPSlot index={5} />
-                              </InputOTPGroup>
-                            </InputOTP>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <Button type="submit" className="w-full hover-elevate active-elevate-2" disabled={isLoading}>
-                      {isLoading ? (
-                        <span className="flex items-center">
-                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                          Creating Account...
-                        </span>
-                      ) : (
-                        <>
-                          <Sparkles className="mr-2 h-4 w-4" />
-                          Verify & Create Account
-                        </>
-                      )}
-                    </Button>
-                    
-                    <p className="text-center text-sm text-muted-foreground">
-                      Didn't receive the code?{" "}
-                      <button
-                        type="button"
-                        className="text-primary hover:underline"
-                        onClick={() => handleSignup(signupData)}
-                      >
-                        Resend
-                      </button>
+                    <p className="text-xs text-muted-foreground text-center">
+                      We'll send you a sign-in link to verify your email
                     </p>
                   </form>
                 </Form>
               )}
 
-              {/* Google Sign Up */}
-              {signupStep === "form" && (
-                <div className="mt-6">
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <Separator className="w-full" />
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
-                    </div>
+              {signupStep === "sent" && (
+                <div className="text-center space-y-4 py-4">
+                  <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                    <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full mt-4 hover-elevate"
-                    onClick={handleGoogleSignIn}
-                    disabled={isLoading}
-                  >
-                    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-                      <path
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                        fill="#4285F4"
-                      />
-                      <path
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                        fill="#34A853"
-                      />
-                      <path
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                        fill="#FBBC05"
-                      />
-                      <path
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                        fill="#EA4335"
-                      />
-                    </svg>
-                    Sign up with Google
-                  </Button>
+                  <div>
+                    <h3 className="font-semibold text-lg">Check your email!</h3>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      We've sent a verification link to<br />
+                      <span className="font-medium text-foreground">{signupData.email}</span>
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Click the link in the email to complete your registration. The link will expire in 1 hour.
+                  </p>
+                  <div className="space-y-2 pt-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => resendEmailLink(signupData.email)} 
+                      disabled={isLoading}
+                      className="w-full"
+                    >
+                      {isLoading ? "Sending..." : "Resend Email"}
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      onClick={resetSignupFlow} 
+                      className="w-full"
+                    >
+                      <ArrowLeft className="h-4 w-4 mr-2" />
+                      Use different email
+                    </Button>
+                  </div>
                 </div>
               )}
-              
-              <p className="text-center text-xs text-muted-foreground mt-4">
-                By signing up, you agree to our{" "}
-                <Link href="/policies" className="text-primary hover:underline">
-                  Terms of Service
-                </Link>{" "}
-                and{" "}
-                <Link href="/policies" className="text-primary hover:underline">
-                  Privacy Policy
-                </Link>
-              </p>
+
+              <div className="relative my-6">
+                <Separator />
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">
+                  or sign up with
+                </span>
+              </div>
+
+              {/* Google Sign Up */}
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+              >
+                <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                Sign up with Google
+              </Button>
             </TabsContent>
           </Tabs>
+
+          <div className="mt-6 text-center text-sm text-muted-foreground">
+            By continuing, you agree to our{" "}
+            <Link href="/policies" className="text-primary hover:underline">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link href="/policies" className="text-primary hover:underline">
+              Privacy Policy
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </div>
