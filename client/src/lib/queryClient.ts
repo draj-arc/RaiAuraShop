@@ -1,9 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-// API base URL - use Render backend in production, local in development
-const API_BASE_URL = import.meta.env.PROD 
-  ? "https://raiaurashop-1.onrender.com" 
-  : "";
+// API base URL - use Vercel serverless API in production, local in development
+const API_BASE_URL = ""; // Vercel: use relative /api/* routes
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
