@@ -6,60 +6,53 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { loginUserSchema } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, Link } from "wouter";
 import { z } from "zod";
-import { Mail, Lock, User, Sparkles, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { Mail, User, Sparkles, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { apiRequest } from "@/lib/queryClient";
 import { Separator } from "@/components/ui/separator";
 import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider, sendEmailLink, isEmailLink, completeEmailSignIn } from "@/lib/firebase";
 
-// Email Link Schema
-const emailLinkSchema = z.object({
+// Email Schema for Sign In
+const signInEmailSchema = z.object({
   email: z.string().email("Please enter a valid email"),
 });
 
-const signupEmailSchema = z.object({
+// Email Schema for Sign Up
+const signUpEmailSchema = z.object({
   username: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Please enter a valid email"),
 });
 
-type LoginMethod = "password" | "emailLink";
-type EmailLinkStep = "request" | "sent";
-type SignupStep = "form" | "sent";
+type AuthStep = "form" | "sent";
 
 export default function LoginPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const [loginMethod, setLoginMethod] = useState<LoginMethod>("password");
-  const [emailLinkStep, setEmailLinkStep] = useState<EmailLinkStep>("request");
-  const [emailForLink, setEmailForLink] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [signupStep, setSignupStep] = useState<SignupStep>("form");
-  const [signupData, setSignupData] = useState({ username: "", email: "" });
+  
+  // Sign In state
+  const [signInStep, setSignInStep] = useState<AuthStep>("form");
+  const [signInEmail, setSignInEmail] = useState("");
+  
+  // Sign Up state
+  const [signUpStep, setSignUpStep] = useState<AuthStep>("form");
+  const [signUpData, setSignUpData] = useState({ username: "", email: "" });
 
-  const loginForm = useForm({
-    resolver: zodResolver(loginUserSchema),
+  const signInForm = useForm({
+    resolver: zodResolver(signInEmailSchema),
     defaultValues: {
       email: "",
-      password: "",
     },
   });
 
-  const signupForm = useForm({
-    resolver: zodResolver(signupEmailSchema),
+  const signUpForm = useForm({
+    resolver: zodResolver(signUpEmailSchema),
     defaultValues: {
       username: "",
-      email: "",
-    },
-  });
-
-  const emailLinkForm = useForm({
-    resolver: zodResolver(emailLinkSchema),
-    defaultValues: {
       email: "",
     },
   });
@@ -69,11 +62,9 @@ export default function LoginPage() {
     const handleEmailLinkSignIn = async () => {
       if (isEmailLink(window.location.href)) {
         setIsLoading(true);
-        // Get the email from localStorage (saved when we sent the link)
         let email = window.localStorage.getItem('emailForSignIn');
         
         if (!email) {
-          // If email is not in localStorage, ask the user for it
           email = window.prompt('Please provide your email for confirmation');
         }
         
@@ -82,12 +73,10 @@ export default function LoginPage() {
             const result = await completeEmailSignIn(email, window.location.href);
             const user = result.user;
             
-            // Get stored signup data if this was a new user
             const storedSignupData = window.localStorage.getItem('signupData');
             const isNewUser = storedSignupData !== null;
             const parsedSignupData = storedSignupData ? JSON.parse(storedSignupData) : null;
             
-            // Send to our backend to create/login user
             const res = await apiRequest("POST", "/api/auth/firebase-email", {
               email: user.email,
               username: parsedSignupData?.username || user.email?.split('@')[0],
@@ -99,7 +88,6 @@ export default function LoginPage() {
             if (res.ok) {
               localStorage.setItem("token", data.token);
               localStorage.setItem("user", JSON.stringify(data.user));
-              // Clean up
               window.localStorage.removeItem('signupData');
               
               toast({
@@ -109,7 +97,6 @@ export default function LoginPage() {
                   : "You have been logged in successfully.",
               });
               
-              // Clear the URL parameters
               window.history.replaceState({}, document.title, window.location.pathname);
               setLocation("/dashboard");
             } else {
@@ -143,31 +130,31 @@ export default function LoginPage() {
     handleEmailLinkSignIn();
   }, []);
 
-  const handleLogin = async (data: z.infer<typeof loginUserSchema>) => {
+  // Sign In - Send Magic Link
+  const handleSignIn = async (data: z.infer<typeof signInEmailSchema>) => {
     setIsLoading(true);
     try {
-      const res = await apiRequest("POST", "/api/login", data);
-      const result = await res.json();
+      await sendEmailLink(data.email);
+      setSignInEmail(data.email);
+      setSignInStep("sent");
       
-      if (res.ok) {
-        localStorage.setItem("token", result.token);
-        localStorage.setItem("user", JSON.stringify(result.user));
-        toast({
-          title: "Welcome back!",
-          description: "You have been logged in successfully.",
-        });
-        setLocation("/dashboard");
-      } else {
-        toast({
-          title: "Login Failed",
-          description: result.message || "Invalid credentials",
-          variant: "destructive",
-        });
-      }
+      toast({
+        title: "Check your email!",
+        description: `We've sent a magic link to ${data.email}. Click the link to sign in.`,
+      });
     } catch (error: any) {
+      console.error("Send email link error:", error);
+      let errorMessage = "Could not send sign-in link. Please try again.";
+      
+      if (error.code === "auth/invalid-email") {
+        errorMessage = "Please enter a valid email address.";
+      } else if (error.code === "auth/quota-exceeded") {
+        errorMessage = "Too many requests. Please try again later.";
+      }
+      
       toast({
         title: "Error",
-        description: "Something went wrong. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -175,28 +162,26 @@ export default function LoginPage() {
     }
   };
 
-  const handleSignup = async (data: z.infer<typeof signupEmailSchema>) => {
+  // Sign Up - Send Magic Link
+  const handleSignUp = async (data: z.infer<typeof signUpEmailSchema>) => {
     setIsLoading(true);
     try {
-      // Store signup data for when user clicks the email link
       window.localStorage.setItem('signupData', JSON.stringify({
         username: data.username,
         email: data.email,
       }));
       
-      // Send Firebase email link
       await sendEmailLink(data.email);
-      
-      setSignupData({ username: data.username, email: data.email });
-      setSignupStep("sent");
+      setSignUpData({ username: data.username, email: data.email });
+      setSignUpStep("sent");
       
       toast({
         title: "Check your email!",
-        description: `We've sent a sign-in link to ${data.email}. Click the link to complete your registration.`,
+        description: `We've sent a verification link to ${data.email}. Click the link to complete your registration.`,
       });
     } catch (error: any) {
       console.error("Send email link error:", error);
-      let errorMessage = "Could not send sign-in link. Please try again.";
+      let errorMessage = "Could not send sign-up link. Please try again.";
       
       if (error.code === "auth/invalid-email") {
         errorMessage = "Please enter a valid email address.";
@@ -214,32 +199,19 @@ export default function LoginPage() {
     }
   };
 
-  const handleSendEmailLink = async (data: z.infer<typeof emailLinkSchema>) => {
+  // Resend magic link
+  const resendEmailLink = async (email: string) => {
     setIsLoading(true);
     try {
-      // Send Firebase email link for login
-      await sendEmailLink(data.email);
-      
-      setEmailForLink(data.email);
-      setEmailLinkStep("sent");
-      
+      await sendEmailLink(email);
       toast({
-        title: "Check your email!",
-        description: `We've sent a sign-in link to ${data.email}. Click the link to sign in.`,
+        title: "Email sent!",
+        description: `We've sent another magic link to ${email}.`,
       });
-    } catch (error: any) {
-      console.error("Send email link error:", error);
-      let errorMessage = "Could not send sign-in link. Please try again.";
-      
-      if (error.code === "auth/invalid-email") {
-        errorMessage = "Please enter a valid email address.";
-      } else if (error.code === "auth/quota-exceeded") {
-        errorMessage = "Too many requests. Please try again later.";
-      }
-      
+    } catch (error) {
       toast({
         title: "Error",
-        description: errorMessage,
+        description: "Could not resend email. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -247,26 +219,27 @@ export default function LoginPage() {
     }
   };
 
-  const resetEmailLinkFlow = () => {
-    setEmailLinkStep("request");
-    setEmailForLink("");
-    emailLinkForm.reset();
+  // Reset flows
+  const resetSignInFlow = () => {
+    setSignInStep("form");
+    setSignInEmail("");
+    signInForm.reset();
   };
 
-  const resetSignupFlow = () => {
-    setSignupStep("form");
-    setSignupData({ username: "", email: "" });
-    signupForm.reset();
+  const resetSignUpFlow = () => {
+    setSignUpStep("form");
+    setSignUpData({ username: "", email: "" });
+    signUpForm.reset();
     window.localStorage.removeItem('signupData');
   };
 
+  // Google Sign In
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
-      // Send Google user info to our backend
       const res = await apiRequest("POST", "/api/auth/google", {
         email: user.email,
         username: user.displayName || user.email?.split('@')[0],
@@ -299,11 +272,9 @@ export default function LoginPage() {
       } else if (error.code === "auth/popup-blocked") {
         errorMessage = "Popup was blocked. Please allow popups for this site.";
       } else if (error.code === "auth/unauthorized-domain") {
-        errorMessage = "This domain is not authorized for Google Sign-In. Please add localhost to Firebase authorized domains.";
+        errorMessage = "This domain is not authorized. Please contact support.";
       } else if (error.code === "auth/network-request-failed") {
         errorMessage = "Network error. Please check your connection.";
-      } else if (error.message) {
-        errorMessage = error.message;
       }
       
       toast({
@@ -316,24 +287,50 @@ export default function LoginPage() {
     }
   };
 
-  const resendEmailLink = async (email: string) => {
-    setIsLoading(true);
-    try {
-      await sendEmailLink(email);
-      toast({
-        title: "Email sent!",
-        description: `We've sent another sign-in link to ${email}.`,
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Could not resend email. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Email Sent Success UI
+  const EmailSentUI = ({ email, onResend, onBack, isSignUp = false }: { 
+    email: string; 
+    onResend: () => void; 
+    onBack: () => void;
+    isSignUp?: boolean;
+  }) => (
+    <div className="text-center space-y-4 py-6">
+      <div className="w-20 h-20 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+        <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
+      </div>
+      <div>
+        <h3 className="font-semibold text-xl">Check your email!</h3>
+        <p className="text-sm text-muted-foreground mt-2">
+          We've sent a magic link to<br />
+          <span className="font-medium text-foreground">{email}</span>
+        </p>
+      </div>
+      <div className="bg-muted/50 rounded-lg p-4 text-sm">
+        <p className="text-muted-foreground">
+          Click the link in the email to {isSignUp ? "complete your registration" : "sign in"}. 
+          The link will expire in 1 hour.
+        </p>
+      </div>
+      <div className="space-y-2 pt-2">
+        <Button 
+          variant="outline" 
+          onClick={onResend} 
+          disabled={isLoading}
+          className="w-full"
+        >
+          {isLoading ? "Sending..." : "Resend Magic Link"}
+        </Button>
+        <Button 
+          variant="ghost" 
+          onClick={onBack} 
+          className="w-full"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Use different email
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center py-12 px-4 bg-gradient-to-br from-background via-background to-accent/10">
@@ -342,7 +339,6 @@ export default function LoginPage() {
       <div className="absolute bottom-20 right-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl" />
       
       <Card className="w-full max-w-md relative overflow-hidden">
-        {/* Decorative corner accent */}
         <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-primary/20 to-transparent" />
         
         <CardHeader className="text-center space-y-4">
@@ -355,54 +351,29 @@ export default function LoginPage() {
               <Sparkles className="h-5 w-5 text-primary" />
             </CardTitle>
             <CardDescription className="mt-2">
-              Sign in to access your account
+              Sign in with your email - no password needed
             </CardDescription>
           </div>
         </CardHeader>
 
         <CardContent>
-          <Tabs defaultValue="login" className="w-full">
+          <Tabs defaultValue="signin" className="w-full">
             <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="login">Sign In</TabsTrigger>
+              <TabsTrigger value="signin">Sign In</TabsTrigger>
               <TabsTrigger value="signup">Create Account</TabsTrigger>
             </TabsList>
 
-            {/* LOGIN TAB */}
-            <TabsContent value="login" className="space-y-4">
-              {/* Login Method Toggle */}
-              <div className="flex gap-2 mb-4">
-                <Button
-                  type="button"
-                  variant={loginMethod === "password" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => { setLoginMethod("password"); resetEmailLinkFlow(); }}
-                  className="flex-1"
-                >
-                  <Lock className="h-4 w-4 mr-1" />
-                  Password
-                </Button>
-                <Button
-                  type="button"
-                  variant={loginMethod === "emailLink" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => { setLoginMethod("emailLink"); loginForm.reset(); }}
-                  className="flex-1"
-                >
-                  <Mail className="h-4 w-4 mr-1" />
-                  Email Link
-                </Button>
-              </div>
-
-              {/* Password Login */}
-              {loginMethod === "password" && (
-                <Form {...loginForm}>
-                  <form onSubmit={loginForm.handleSubmit(handleLogin)} className="space-y-4">
+            {/* SIGN IN TAB */}
+            <TabsContent value="signin" className="space-y-4">
+              {signInStep === "form" ? (
+                <Form {...signInForm}>
+                  <form onSubmit={signInForm.handleSubmit(handleSignIn)} className="space-y-4">
                     <FormField
-                      control={loginForm.control}
+                      control={signInForm.control}
                       name="email"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Email</FormLabel>
+                          <FormLabel>Email Address</FormLabel>
                           <FormControl>
                             <div className="relative">
                               <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -413,97 +384,21 @@ export default function LoginPage() {
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={loginForm.control}
-                      name="password"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Password</FormLabel>
-                          <FormControl>
-                            <div className="relative">
-                              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                              <Input {...field} type="password" placeholder="••••••••" className="pl-10" />
-                            </div>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
                     <Button type="submit" className="w-full luxury-button" disabled={isLoading}>
-                      {isLoading ? "Signing In..." : "Sign In"}
+                      <Mail className="h-4 w-4 mr-2" />
+                      {isLoading ? "Sending..." : "Send Magic Link"}
                     </Button>
+                    <p className="text-xs text-muted-foreground text-center">
+                      We'll send you a magic link to sign in instantly - no password required!
+                    </p>
                   </form>
                 </Form>
-              )}
-
-              {/* Email Link Login */}
-              {loginMethod === "emailLink" && (
-                <>
-                  {emailLinkStep === "request" && (
-                    <Form {...emailLinkForm}>
-                      <form onSubmit={emailLinkForm.handleSubmit(handleSendEmailLink)} className="space-y-4">
-                        <FormField
-                          control={emailLinkForm.control}
-                          name="email"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Email Address</FormLabel>
-                              <FormControl>
-                                <div className="relative">
-                                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                  <Input {...field} type="email" placeholder="your@email.com" className="pl-10" />
-                                </div>
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <Button type="submit" className="w-full luxury-button" disabled={isLoading}>
-                          {isLoading ? "Sending..." : "Send Sign-In Link"}
-                        </Button>
-                        <p className="text-xs text-muted-foreground text-center">
-                          We'll send you a magic link to sign in instantly
-                        </p>
-                      </form>
-                    </Form>
-                  )}
-
-                  {emailLinkStep === "sent" && (
-                    <div className="text-center space-y-4 py-4">
-                      <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
-                        <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-lg">Check your email!</h3>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          We've sent a sign-in link to<br />
-                          <span className="font-medium text-foreground">{emailForLink}</span>
-                        </p>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Click the link in the email to sign in. The link will expire in 1 hour.
-                      </p>
-                      <div className="space-y-2 pt-2">
-                        <Button 
-                          variant="outline" 
-                          onClick={() => resendEmailLink(emailForLink)} 
-                          disabled={isLoading}
-                          className="w-full"
-                        >
-                          {isLoading ? "Sending..." : "Resend Email"}
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          onClick={resetEmailLinkFlow} 
-                          className="w-full"
-                        >
-                          <ArrowLeft className="h-4 w-4 mr-2" />
-                          Use different email
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
+              ) : (
+                <EmailSentUI 
+                  email={signInEmail} 
+                  onResend={() => resendEmailLink(signInEmail)} 
+                  onBack={resetSignInFlow}
+                />
               )}
 
               <div className="relative my-6">
@@ -513,7 +408,6 @@ export default function LoginPage() {
                 </span>
               </div>
 
-              {/* Google Sign In */}
               <Button
                 type="button"
                 variant="outline"
@@ -531,13 +425,13 @@ export default function LoginPage() {
               </Button>
             </TabsContent>
 
-            {/* SIGNUP TAB */}
+            {/* SIGN UP TAB */}
             <TabsContent value="signup" className="space-y-4">
-              {signupStep === "form" && (
-                <Form {...signupForm}>
-                  <form onSubmit={signupForm.handleSubmit(handleSignup)} className="space-y-4">
+              {signUpStep === "form" ? (
+                <Form {...signUpForm}>
+                  <form onSubmit={signUpForm.handleSubmit(handleSignUp)} className="space-y-4">
                     <FormField
-                      control={signupForm.control}
+                      control={signUpForm.control}
                       name="username"
                       render={({ field }) => (
                         <FormItem>
@@ -553,11 +447,11 @@ export default function LoginPage() {
                       )}
                     />
                     <FormField
-                      control={signupForm.control}
+                      control={signUpForm.control}
                       name="email"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Email</FormLabel>
+                          <FormLabel>Email Address</FormLabel>
                           <FormControl>
                             <div className="relative">
                               <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -569,49 +463,21 @@ export default function LoginPage() {
                       )}
                     />
                     <Button type="submit" className="w-full luxury-button" disabled={isLoading}>
-                      {isLoading ? "Creating Account..." : "Create Account"}
+                      <Mail className="h-4 w-4 mr-2" />
+                      {isLoading ? "Sending..." : "Send Verification Link"}
                     </Button>
                     <p className="text-xs text-muted-foreground text-center">
-                      We'll send you a sign-in link to verify your email
+                      We'll send you a magic link to verify your email and create your account
                     </p>
                   </form>
                 </Form>
-              )}
-
-              {signupStep === "sent" && (
-                <div className="text-center space-y-4 py-4">
-                  <div className="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
-                    <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Check your email!</h3>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      We've sent a verification link to<br />
-                      <span className="font-medium text-foreground">{signupData.email}</span>
-                    </p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Click the link in the email to complete your registration. The link will expire in 1 hour.
-                  </p>
-                  <div className="space-y-2 pt-2">
-                    <Button 
-                      variant="outline" 
-                      onClick={() => resendEmailLink(signupData.email)} 
-                      disabled={isLoading}
-                      className="w-full"
-                    >
-                      {isLoading ? "Sending..." : "Resend Email"}
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      onClick={resetSignupFlow} 
-                      className="w-full"
-                    >
-                      <ArrowLeft className="h-4 w-4 mr-2" />
-                      Use different email
-                    </Button>
-                  </div>
-                </div>
+              ) : (
+                <EmailSentUI 
+                  email={signUpData.email} 
+                  onResend={() => resendEmailLink(signUpData.email)} 
+                  onBack={resetSignUpFlow}
+                  isSignUp={true}
+                />
               )}
 
               <div className="relative my-6">
@@ -621,7 +487,6 @@ export default function LoginPage() {
                 </span>
               </div>
 
-              {/* Google Sign Up */}
               <Button
                 type="button"
                 variant="outline"
