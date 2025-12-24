@@ -16,7 +16,7 @@ export default function ProductDetailPage() {
   const cart = useContext(CartContext);
 
   const { data: product, isLoading } = useQuery<Product>({
-    queryKey: ["/api/products", params?.slug],
+    queryKey: ["/.netlify/functions/products", params?.slug],
   });
 
   if (isLoading) {

@@ -13,11 +13,11 @@ export default function ShopPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(categoryFilter);
 
   const { data: categories = [] } = useQuery<Category[]>({
-    queryKey: ["/api/categories"],
+    queryKey: ["/.netlify/functions/categories"],
   });
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products", selectedCategory],
+    queryKey: ["/.netlify/functions/products", selectedCategory],
   });
 
   const filteredProducts = selectedCategory

@@ -167,7 +167,7 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       // First check if email already exists
-      const checkRes = await apiRequest("POST", "/api/auth/check-email", { email: data.email });
+      const checkRes = await apiRequest("POST", "/.netlify/functions/check-email", { email: data.email });
       const checkData = await checkRes.json();
       
       if (checkData.exists) {
@@ -254,7 +254,7 @@ export default function LoginPage() {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
-      const res = await apiRequest("POST", "/api/auth/google", {
+      const res = await apiRequest("POST", "/.netlify/functions/login", {
         email: user.email,
         username: user.displayName || user.email?.split('@')[0],
         googleId: user.uid,

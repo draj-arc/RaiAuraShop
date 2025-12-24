@@ -14,11 +14,11 @@ const STATIC_HERO_IMAGE = "https://images.unsplash.com/photo-1515562141207-7a88f
 
 export default function HomePage() {
   const { data: categories = [] } = useQuery<Category[]>({
-    queryKey: ["/api/categories"],
+    queryKey: ["/.netlify/functions/categories"],
   });
 
   const { data: featuredProducts = [] } = useQuery<Product[]>({
-    queryKey: ["/api/products/featured"],
+    queryKey: ["/.netlify/functions/products/featured"],
   });
 
   return (

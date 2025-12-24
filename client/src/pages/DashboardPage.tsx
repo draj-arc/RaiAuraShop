@@ -45,7 +45,7 @@ export default function DashboardPage() {
   }, []);
 
   const { data: orders = [] } = useQuery<Order[]>({
-    queryKey: ["/api/orders"],
+    queryKey: ["/.netlify/functions/orders"],
   });
 
   const handleLogout = () => {
