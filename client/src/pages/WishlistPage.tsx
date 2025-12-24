@@ -18,7 +18,7 @@ export default function WishlistPage() {
   const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
 
   const { data: products = [] } = useQuery<Product[]>({
-    queryKey: ["/.netlify/functions/products"],
+    queryKey: ["/api/products"],
   });
 
   useEffect(() => {

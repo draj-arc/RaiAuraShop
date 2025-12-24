@@ -129,7 +129,7 @@ export default function CheckoutPage() {
         })),
       };
 
-      const response = await apiRequest("POST", "/.netlify/functions/orders", orderPayload);
+      const response = await apiRequest("POST", "/api/orders", orderPayload);
       
       if (!response.ok) {
         const error = await response.json();

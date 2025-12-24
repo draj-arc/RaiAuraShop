@@ -38,20 +38,20 @@ export default function AdminPage() {
   const { toast } = useToast();
 
   const { data: products = [] } = useQuery<Product[]>({
-    queryKey: ["/.netlify/functions/products"],
+    queryKey: ["/api/products"],
   });
 
   const { data: categories = [] } = useQuery<Category[]>({
-    queryKey: ["/.netlify/functions/categories"],
+    queryKey: ["/api/categories"],
   });
 
   const createProductMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/.netlify/functions/products", data);
+      const res = await apiRequest("POST", "/api/products", data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast({ title: "Success", description: "Product created successfully" });
       setProductDialogOpen(false);
       productForm.reset();
@@ -64,11 +64,11 @@ export default function AdminPage() {
 
   const deleteProductMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("DELETE", `/.netlify/functions/products/${id}`, undefined);
+      const res = await apiRequest("DELETE", `/api/products/${id}`, undefined);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast({ title: "Success", description: "Product deleted successfully" });
     },
     onError: (error: any) => {
@@ -78,11 +78,11 @@ export default function AdminPage() {
 
   const updateProductMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const res = await apiRequest("PUT", `/.netlify/functions/products/${id}`, data);
+      const res = await apiRequest("PUT", `/api/products/${id}`, data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast({ title: "Success", description: "Product updated successfully" });
     },
     onError: (error: any) => {
@@ -92,11 +92,11 @@ export default function AdminPage() {
 
   const createCategoryMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/.netlify/functions/categories", data);
+      const res = await apiRequest("POST", "/api/categories", data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/categories"] });
       toast({ title: "Success", description: "Category created successfully" });
       setCategoryDialogOpen(false);
     },
@@ -107,11 +107,11 @@ export default function AdminPage() {
 
   const updateCategoryMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const res = await apiRequest("PUT", `/.netlify/functions/categories/${id}`, data);
+      const res = await apiRequest("PUT", `/api/categories/${id}`, data);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/categories"] });
       toast({ title: "Success", description: "Category updated successfully" });
       setEditCategoryId(null);
       setEditCategoryDialogOpen(false);
@@ -123,11 +123,11 @@ export default function AdminPage() {
 
   const deleteCategoryMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await apiRequest("DELETE", `/.netlify/functions/categories/${id}`, undefined);
+      const res = await apiRequest("DELETE", `/api/categories/${id}`, undefined);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/categories"] });
       toast({ title: "Success", description: "Category deleted successfully" });
     },
     onError: (error: any) => {
@@ -846,7 +846,7 @@ export default function AdminPage() {
               <h2 className="text-2xl font-semibold">Orders</h2>
               <Button 
                 variant="outline" 
-                onClick={() => queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/orders"] })}
+                onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/orders"] })}
                 className="hover-elevate"
               >
                 Refresh Orders
@@ -863,17 +863,17 @@ export default function AdminPage() {
 // Orders Section Component
 function OrdersSection() {
   const { data: orders = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/.netlify/functions/orders"],
+    queryKey: ["/api/orders"],
     refetchInterval: 30000, // Auto-refresh every 30 seconds
   });
 
   const updateOrderStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const res = await apiRequest("PUT", `/.netlify/functions/orders/${id}/status`, { status });
+      const res = await apiRequest("PUT", `/api/orders/${id}/status`, { status });
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/.netlify/functions/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
     },
   });
 
