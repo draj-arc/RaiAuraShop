@@ -1,7 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-// API base URL - use Vercel serverless API in production, local in development
-const API_BASE_URL = ""; // Vercel: use relative /api/* routes
+// API base URL - use Netlify Functions
+const API_BASE_URL = "/.netlify/functions";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
