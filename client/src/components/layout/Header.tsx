@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { ShoppingCart, User, Menu, Search, LogOut, Heart, MapPin, CreditCard, Gift, HelpCircle, LayoutDashboard, Settings, ShoppingBag } from "lucide-react";
+import { ShoppingCart, User, Menu, Search, LogOut, Heart, MapPin, CreditCard, Gift, HelpCircle, LayoutDashboard, Settings, ShoppingBag, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
@@ -17,10 +17,10 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 interface UserData {
-  id: number;
+  id: string;
   username: string;
   email: string;
-  role: string;
+  isAdmin: boolean;
 }
 
 export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, cartItemCount: number }) {
@@ -28,13 +28,19 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<UserData | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return document.documentElement.classList.contains('dark');
+    }
+    return false;
+  });
 
   // Check for logged in user on mount and when location changes
   useEffect(() => {
     const checkAuth = () => {
       const token = localStorage.getItem("token");
       const userData = localStorage.getItem("user");
-      
+
       if (token && userData) {
         try {
           const parsedUser = JSON.parse(userData);
@@ -51,7 +57,7 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
     };
 
     checkAuth();
-    
+
     // Listen for storage changes (for multi-tab sync)
     window.addEventListener("storage", checkAuth);
     return () => window.removeEventListener("storage", checkAuth);
@@ -64,6 +70,27 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
     setIsLoggedIn(false);
     setLocation("/");
   };
+
+  const toggleDarkMode = () => {
+    const newMode = !isDarkMode;
+    setIsDarkMode(newMode);
+    if (newMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  };
+
+  // Initialize theme on mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+      setIsDarkMode(true);
+    }
+  }, []);
 
   const getInitials = (name: string) => {
     return name
@@ -82,7 +109,7 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
   ];
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-50 w-full bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto px-4 md:px-8">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-8">
@@ -91,14 +118,13 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
                 <Logo size="md" />
               </div>
             </Link>
-            
+
             <nav className="hidden md:flex items-center gap-6">
               {navLinks.map((link) => (
                 <Link key={link.href} href={link.href}>
                   <span
-                    className={`text-sm tracking-widest transition-colors hover:text-primary cursor-pointer ${
-                      location === link.href ? "text-primary font-medium" : "text-muted-foreground"
-                    }`}
+                    className={`text-sm tracking-widest transition-colors hover:text-primary cursor-pointer ${location === link.href ? "text-primary font-medium" : "text-muted-foreground"
+                      }`}
                     data-testid={`link-nav-${link.label.toLowerCase()}`}
                   >
                     {link.label}
@@ -109,6 +135,15 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hover-elevate active-elevate-2"
+              onClick={toggleDarkMode}
+              data-testid="button-theme-toggle"
+            >
+              {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -181,7 +216,7 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
                     <HelpCircle className="mr-2 h-4 w-4" />
                     Help & Support
                   </DropdownMenuItem>
-                  {user.role === "admin" && (
+                  {user.isAdmin && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => setLocation("/admin")} className="cursor-pointer">
@@ -226,9 +261,8 @@ export function Header({ onCartOpen, cartItemCount }: { onCartOpen: () => void, 
                   {navLinks.map((link) => (
                     <Link key={link.href} href={link.href}>
                       <span
-                        className={`text-lg tracking-widest transition-colors hover:text-primary cursor-pointer block ${
-                          location === link.href ? "text-primary font-medium" : "text-muted-foreground"
-                        }`}
+                        className={`text-lg tracking-widest transition-colors hover:text-primary cursor-pointer block ${location === link.href ? "text-primary font-medium" : "text-muted-foreground"
+                          }`}
                         onClick={() => setMobileMenuOpen(false)}
                         data-testid={`link-mobile-${link.label.toLowerCase()}`}
                       >

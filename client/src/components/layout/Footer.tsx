@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 
 export function Footer() {
   return (
-    <footer className="border-t bg-background mt-auto">
+    <footer className="bg-background mt-auto">
       <div className="container mx-auto px-4 md:px-8 py-12 md:py-16">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12">
           <div>
@@ -50,7 +50,6 @@ export function Footer() {
             <h4 className="font-semibold text-foreground mb-4 tracking-wide">CONNECT WITH US</h4>
             <div className="flex gap-3 mb-6">
               <Button
-                variant="outline"
                 size="icon"
                 className="hover-elevate active-elevate-2"
                 asChild
@@ -61,7 +60,6 @@ export function Footer() {
                 </a>
               </Button>
               <Button
-                variant="outline"
                 size="icon"
                 className="hover-elevate active-elevate-2"
                 asChild
@@ -89,7 +87,7 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="border-t mt-8 pt-8 text-center">
+        <div className="mt-8 pt-8 text-center">
           <p className="text-sm text-muted-foreground">
             © {new Date().getFullYear()} Rai Aura. All rights reserved.
           </p>

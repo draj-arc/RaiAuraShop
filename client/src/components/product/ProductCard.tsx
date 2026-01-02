@@ -43,23 +43,23 @@ export function ProductCard({ id, name, price, image, slug }: ProductCardProps) 
               </div>
             )}
             <Button
-              variant="secondary"
+              variant="default"
               size="icon"
-              className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity hover-elevate active-elevate-2"
+              className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-all shadow-lg bg-primary text-primary-foreground hover:bg-primary/90 h-10 w-10"
               onClick={handleAddToCart}
               data-testid={`button-quick-add-${id}`}
             >
-              <ShoppingCart className="h-4 w-4" />
+              <ShoppingCart className="h-5 w-5" />
             </Button>
           </div>
         </Link>
-        <div className="p-4">
+        <div className="p-3">
           <Link href={`/product/${slug}`}>
-            <h3 className="font-medium text-foreground mb-1 hover:text-primary transition-colors" data-testid={`text-product-name-${id}`}>
+            <h3 className="font-medium text-sm text-foreground mb-1 hover:text-primary transition-colors truncate" data-testid={`text-product-name-${id}`}>
               {name}
             </h3>
           </Link>
-          <p className="font-serif text-lg text-primary font-semibold" data-testid={`text-product-price-${id}`}>
+          <p className="font-serif text-base text-primary font-semibold" data-testid={`text-product-price-${id}`}>
             ₹{price}
           </p>
         </div>

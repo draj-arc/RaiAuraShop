@@ -20,6 +20,8 @@ import {
   type WishlistItem,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
+import { db } from "./firebase";
+import { collection, doc, getDoc, getDocs, query, where, addDoc, updateDoc, deleteDoc } from "firebase/firestore";
 
 // Using in-memory storage (no Firebase required)
 // Data will be lost on server restart - use Firebase/PostgreSQL for production
@@ -28,7 +30,9 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByFirebaseUid(firebaseUid: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
 
   getProducts(): Promise<Product[]>;
   getFeaturedProducts(): Promise<Product[]>;
@@ -54,6 +58,7 @@ export interface IStorage {
   getOrders(userId?: string): Promise<Order[]>;
   getOrderById(id: string): Promise<Order | undefined>;
   createOrder(order: InsertOrder, items: { productId: string; productName: string; productPrice: string; quantity: number }[]): Promise<Order>;
+  getOrderItems(orderId: string): Promise<OrderItem[]>;
   updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
 
   // Wishlist methods
@@ -93,9 +98,29 @@ export class DatabaseStorage implements IStorage {
     return undefined;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
+  async getUserByFirebaseUid(firebaseUid: string): Promise<User | undefined> {
+    const q = query(collection(db, "users"), where("firebaseUid", "==", firebaseUid));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const doc = querySnapshot.docs[0];
+      return { id: doc.id, ...doc.data() } as User;
+    }
+    return undefined;
+  }
+
+  async createUser(insertUser: InsertUser & { firebaseUid?: string }): Promise<User> {
     const docRef = await addDoc(collection(db, "users"), insertUser);
     return { id: docRef.id, ...insertUser } as User;
+  }
+
+  async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
+    const docRef = doc(db, "users", id);
+    try {
+      await updateDoc(docRef, user);
+      return await this.getUser(id);
+    } catch (e) {
+      return undefined;
+    }
   }
 
   async getProducts(): Promise<Product[]> {
@@ -275,6 +300,12 @@ export class DatabaseStorage implements IStorage {
     return newOrder;
   }
 
+  async getOrderItems(orderId: string): Promise<OrderItem[]> {
+    const q = query(collection(db, "orderItems"), where("orderId", "==", orderId));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as OrderItem));
+  }
+
   async updateOrderStatus(id: string, status: string): Promise<Order | undefined> {
     const docRef = doc(db, "orders", id);
     await updateDoc(docRef, { status });
@@ -295,8 +326,8 @@ export class DatabaseStorage implements IStorage {
   async addToWishlist(userId: string, productId: string): Promise<WishlistItem> {
     // Check if already exists
     const q = query(
-      collection(db, "wishlistItems"), 
-      where("userId", "==", userId), 
+      collection(db, "wishlistItems"),
+      where("userId", "==", userId),
       where("productId", "==", productId)
     );
     const querySnapshot = await getDocs(q);
@@ -315,8 +346,8 @@ export class DatabaseStorage implements IStorage {
 
   async removeFromWishlist(userId: string, productId: string): Promise<void> {
     const q = query(
-      collection(db, "wishlistItems"), 
-      where("userId", "==", userId), 
+      collection(db, "wishlistItems"),
+      where("userId", "==", userId),
       where("productId", "==", productId)
     );
     const querySnapshot = await getDocs(q);
@@ -326,8 +357,8 @@ export class DatabaseStorage implements IStorage {
 
   async isInWishlist(userId: string, productId: string): Promise<boolean> {
     const q = query(
-      collection(db, "wishlistItems"), 
-      where("userId", "==", userId), 
+      collection(db, "wishlistItems"),
+      where("userId", "==", userId),
       where("productId", "==", productId)
     );
     const querySnapshot = await getDocs(q);
@@ -347,98 +378,136 @@ class MemoryStorage implements IStorage {
   private idCounter = 1;
 
   constructor() {
-    // Initialize with default categories
-    const defaultCategories = [
-      { name: "Bracelet", slug: "bracelet", description: "Beautiful bracelets for every occasion", imageUrl: "/images/bracelet.jpg" },
-      { name: "Earrings", slug: "earrings", description: "Elegant earrings and studs", imageUrl: "/images/earring.jpg" },
-      { name: "Ring", slug: "ring", description: "Exquisite rings for all styles", imageUrl: "/images/ring.jpg" },
-      { name: "Neckchain", slug: "neckchain", description: "Stunning neckchains and pendants", imageUrl: "/images/neckchain.jpg" },
+    // Categories from seed.ts
+    const seedCategories = [
+      { name: "Earrings", slug: "earrings", description: "Elegant earrings for every occasion", displayOrder: 1, imageUrl: "https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=800&q=80" },
+      { name: "Rings", slug: "rings", description: "Beautiful rings to adorn your fingers", displayOrder: 2, imageUrl: "https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=800&q=80" },
+      { name: "Bracelets", slug: "bracelets", description: "Stunning bracelets for your wrists", displayOrder: 3, imageUrl: "https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=800&q=80" },
+      { name: "Necklaces", slug: "necklaces", description: "Exquisite necklaces to complement any outfit", displayOrder: 4, imageUrl: "https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=800&q=80" },
+      { name: "Hair Accessories", slug: "hair-accessories", description: "Delicate accessories for your hair", displayOrder: 5, imageUrl: "https://images.unsplash.com/photo-1589156280159-27698a70f29e?w=800&q=80" }, // Added plausible image for Hair Accessories
     ];
 
-    defaultCategories.forEach((cat, index) => {
+    const catMap = new Map<string, string>(); // slug -> id
+
+    seedCategories.forEach((cat, index) => {
       const id = `cat_${index + 1}`;
-      this.categories.set(id, { id, ...cat } as Category);
+      // @ts-ignore
+      this.categories.set(id, { id, ...cat });
+      catMap.set(cat.slug, id);
     });
-    
-    console.log("✅ Default categories loaded: Bracelet, Earrings, Ring, Neckchain");
-    
-    // Initialize with sample products
-    const sampleProducts = [
+    console.log("✅ Seed categories loaded: Earrings, Rings, Bracelets, Necklaces, Hair Accessories");
+
+    // Products from seed.ts
+    const seedProducts = [
       {
-        name: "Golden Elegance Ring",
-        slug: "golden-elegance-ring",
-        description: "A stunning 18K gold ring with intricate design, perfect for special occasions.",
-        price: "4999",
-        categoryId: "cat_3", // Ring
-        images: ["/images/products/ring1.jpg"],
-        material: "18K Gold",
+        name: "Rose Gold Drop Earrings",
+        slug: "rose-gold-drop-earrings",
+        description: "Elegant rose gold drop earrings featuring delicate chains and a contemporary design. Perfect for both casual and formal occasions.",
+        price: "89.99",
+        categorySlug: "earrings",
+        images: ["https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=800&q=80"],
         stock: 15,
-        featured: true
+        material: "Rose Gold",
+        featured: true,
+      },
+      {
+        name: "Pearl Stud Earrings",
+        slug: "pearl-stud-earrings",
+        description: "Classic pearl stud earrings set in sterling silver. Timeless elegance for everyday wear.",
+        price: "65.00",
+        categorySlug: "earrings",
+        images: ["https://images.unsplash.com/photo-1596944946407-cf89c93b1149?w=800&q=80"],
+        stock: 20,
+        material: "Sterling Silver, Pearl",
+        featured: false,
       },
       {
         name: "Diamond Solitaire Ring",
         slug: "diamond-solitaire-ring",
-        description: "Classic diamond solitaire ring with brilliant cut stone.",
-        price: "12999",
-        categoryId: "cat_3", // Ring
-        images: ["/images/products/ring2.jpg"],
-        material: "Platinum, Diamond",
-        stock: 8,
-        featured: true
+        description: "A stunning solitaire diamond ring set in 14k white gold. The perfect symbol of eternal love.",
+        price: "1299.00",
+        categorySlug: "rings",
+        images: ["https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=800&q=80"],
+        stock: 5,
+        material: "14k White Gold, Diamond",
+        featured: true,
       },
       {
-        name: "Pearl Drop Earrings",
-        slug: "pearl-drop-earrings",
-        description: "Elegant freshwater pearl drop earrings with gold accents.",
-        price: "2499",
-        categoryId: "cat_2", // Earrings
-        images: ["/images/products/earring1.jpg"],
-        material: "Gold, Pearl",
-        stock: 20,
-        featured: true
-      },
-      {
-        name: "Crystal Stud Earrings",
-        slug: "crystal-stud-earrings",
-        description: "Sparkling crystal studs for everyday elegance.",
-        price: "1299",
-        categoryId: "cat_2", // Earrings
-        images: ["/images/products/earring2.jpg"],
-        material: "Sterling Silver, Crystal",
-        stock: 30,
-        featured: false
-      },
-      {
-        name: "Rose Gold Bracelet",
-        slug: "rose-gold-bracelet",
-        description: "Delicate rose gold bracelet with heart charm.",
-        price: "3499",
-        categoryId: "cat_1", // Bracelet
-        images: ["/images/products/bracelet1.jpg"],
-        material: "Rose Gold",
+        name: "Stackable Rose Gold Rings",
+        slug: "stackable-rose-gold-rings",
+        description: "Set of three delicate stackable rings in rose gold. Mix and match for a personalized look.",
+        price: "149.00",
+        categorySlug: "rings",
+        images: ["https://images.unsplash.com/photo-1603561591411-07134e71a2a9?w=800&q=80"],
         stock: 12,
-        featured: true
+        material: "Rose Gold",
+        featured: true,
       },
       {
-        name: "Silver Chain Necklace",
-        slug: "silver-chain-necklace",
-        description: "Classic sterling silver chain necklace, versatile and timeless.",
-        price: "1999",
-        categoryId: "cat_4", // Neckchain
-        images: ["/images/products/neckchain1.jpg"],
+        name: "Charm Bracelet",
+        slug: "charm-bracelet",
+        description: "Sterling silver charm bracelet with customizable charms. Tell your unique story.",
+        price: "179.00",
+        categorySlug: "bracelets",
+        images: ["https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=800&q=80"],
+        stock: 10,
         material: "Sterling Silver",
-        stock: 25,
-        featured: true
-      }
+        featured: false,
+      },
+      {
+        name: "Gold Bangle Bracelet",
+        slug: "gold-bangle-bracelet",
+        description: "Classic 18k gold bangle bracelet with a sleek, modern design. A wardrobe essential.",
+        price: "399.00",
+        categorySlug: "bracelets",
+        images: ["https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=800&q=80"],
+        stock: 8,
+        material: "18k Gold",
+        featured: true,
+      },
+      {
+        name: "Layered Chain Necklace",
+        slug: "layered-chain-necklace",
+        description: "Delicate layered chain necklace in rose gold. Perfect for adding dimension to any outfit.",
+        price: "129.00",
+        categorySlug: "necklaces",
+        images: ["https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=800&q=80"],
+        stock: 18,
+        material: "Rose Gold",
+        featured: false,
+      },
+      {
+        name: "Pearl Pendant Necklace",
+        slug: "pearl-pendant-necklace",
+        description: "Elegant pearl pendant on a delicate gold chain. Sophisticated and timeless.",
+        price: "199.00",
+        categorySlug: "necklaces",
+        images: ["https://images.unsplash.com/photo-1506630448388-4e683c67ddb0?w=800&q=80"],
+        stock: 14,
+        material: "Gold, Pearl",
+        featured: false,
+      },
     ];
 
-    sampleProducts.forEach((product, index) => {
+    seedProducts.forEach((product, index) => {
       const id = `prod_${index + 1}`;
-      this.products.set(id, { id, ...product, createdAt: new Date() } as Product);
+      const categoryId = catMap.get(product.categorySlug);
+
+      if (categoryId) {
+        // Remove categorySlug from the object before spreading, create a clean object
+        const { categorySlug, ...rest } = product;
+        // @ts-ignore
+        this.products.set(id, {
+          id,
+          categoryId,
+          ...rest,
+          createdAt: new Date()
+        });
+      }
     });
 
-    console.log("✅ Sample products loaded: 6 products across categories");
-    
+    console.log(`✅ Seed products loaded: ${seedProducts.length} products`);
+
     // Initialize admin user synchronously
     this.initializeAdminSync();
   }
@@ -446,7 +515,7 @@ class MemoryStorage implements IStorage {
   private initializeAdminSync() {
     const adminEmail = "raiaura.shop@gmail.com";
     const adminPassword = "Deepraj@22";
-    
+
     // Check if admin already exists
     const existingAdmin = Array.from(this.users.values()).find(u => u.email === adminEmail);
     if (!existingAdmin) {
@@ -458,6 +527,7 @@ class MemoryStorage implements IStorage {
         email: adminEmail,
         password: hashedPassword,
         isAdmin: true,
+        firebaseUid: null,
         createdAt: new Date()
       };
       this.users.set(adminUser.id, adminUser);
@@ -481,17 +551,30 @@ class MemoryStorage implements IStorage {
     return Array.from(this.users.values()).find(u => u.email === email);
   }
 
+  async getUserByFirebaseUid(firebaseUid: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(u => u.firebaseUid === firebaseUid);
+  }
+
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = this.generateId();
-    const user: User = { 
-      id, 
-      ...insertUser, 
+    const user: User = {
+      id,
+      ...insertUser,
+      firebaseUid: insertUser.firebaseUid || null,
       isAdmin: insertUser.isAdmin ?? false,
-      createdAt: new Date() 
+      createdAt: new Date()
     };
     this.users.set(id, user);
     console.log(`✅ User created: ${user.email}`);
     return user;
+  }
+
+  async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
+    const existing = this.users.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...user };
+    this.users.set(id, updated);
+    return updated;
   }
 
   async getProducts(): Promise<Product[]> {
@@ -604,6 +687,10 @@ class MemoryStorage implements IStorage {
     return allOrders;
   }
 
+  async getOrderItems(orderId: string): Promise<OrderItem[]> {
+    return Array.from(this.orderItems.values()).filter(item => item.orderId === orderId);
+  }
+
   async getOrderById(id: string): Promise<Order | undefined> {
     return this.orders.get(id);
   }
@@ -675,5 +762,5 @@ class MemoryStorage implements IStorage {
   }
 }
 
-// Use in-memory storage (works without Firebase)
-export const storage = new MemoryStorage();
+// Use Database storage (Firebase)
+export const storage = new DatabaseStorage();

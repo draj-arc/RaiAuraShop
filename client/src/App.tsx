@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { CartDrawer } from "@/components/cart/CartDrawer";
+import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { useState, createContext, useEffect } from "react";
 import { useCart } from "@/hooks/use-cart";
 import HomePage from "@/pages/HomePage";
@@ -30,11 +31,11 @@ export const CartContext = createContext<ReturnType<typeof useCart> | null>(null
 // Component to scroll to top on route change
 function ScrollToTop() {
   const [location] = useLocation();
-  
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [location]);
-  
+
   return null;
 }
 
@@ -47,8 +48,16 @@ function Router() {
         <Route path="/shop" component={ShopPage} />
         <Route path="/product/:slug" component={ProductDetailPage} />
         <Route path="/checkout" component={CheckoutPage} />
-        <Route path="/dashboard" component={DashboardPage} />
-        <Route path="/admin" component={AdminPage} />
+        <Route path="/dashboard">
+          <ProtectedRoute>
+            <DashboardPage />
+          </ProtectedRoute>
+        </Route>
+        <Route path="/admin">
+          <ProtectedRoute adminOnly>
+            <AdminPage />
+          </ProtectedRoute>
+        </Route>
         <Route path="/about" component={AboutPage} />
         <Route path="/contact" component={ContactPage} />
         <Route path="/faq" component={FAQPage} />

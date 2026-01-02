@@ -9,6 +9,7 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  firebaseUid: text("firebase_uid"),
   isAdmin: boolean("is_admin").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -140,6 +141,7 @@ export const insertUserSchema = createInsertSchema(users).omit({
 }).extend({
   email: z.string().email(),
   password: z.string().min(6),
+  firebaseUid: z.string().optional(),
 });
 
 export const loginUserSchema = z.object({
@@ -198,3 +200,5 @@ export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 
 export type WishlistItem = typeof wishlistItems.$inferSelect;
+
+export type OrderWithItems = Order & { items: OrderItem[] };

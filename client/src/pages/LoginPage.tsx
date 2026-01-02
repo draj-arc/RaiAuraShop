@@ -27,17 +27,82 @@ const signUpEmailSchema = z.object({
   email: z.string().email("Please enter a valid email"),
 });
 
-type AuthStep = "form" | "sent";
+type AuthStep = "form" | "otp" | "emailSent";
 
 export default function LoginPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(false);
-  
+
+  // Magic Link Handler
+  useEffect(() => {
+    if (isEmailLink(window.location.href)) {
+      let email = window.localStorage.getItem('emailForSignIn');
+      const authMode = window.localStorage.getItem('authMode') || 'signin'; // 'signin' | 'signup'
+
+      if (!email) {
+        // User opened link on different device. Ask for email.
+        email = window.prompt('Please provide your email for confirmation');
+      }
+
+      if (email) {
+        setIsLoading(true);
+        completeEmailSignIn(email, window.location.href)
+          .then(async (result) => {
+            // Verify with backend to get JWT token
+            const user = result.user;
+            const storedUsername = window.localStorage.getItem('signupUsername');
+
+            const res = await apiRequest("POST", "/api/auth/firebase-email", {
+              email: user.email,
+              username: storedUsername || user.displayName || user.email?.split('@')[0],
+              firebaseUid: user.uid,
+              isNewUser: authMode === 'signup'
+            });
+
+            if (!res.ok) {
+              const data = await res.json();
+              throw new Error(data.message || "Failed to authenticate with server");
+            }
+
+            const data = await res.json();
+            localStorage.setItem("token", data.token);
+            localStorage.setItem("user", JSON.stringify(data.user));
+
+            // Set dark mode as default upon login
+            localStorage.setItem("theme", "dark");
+            document.documentElement.classList.add("dark");
+
+            // Clean up
+            window.localStorage.removeItem('emailForSignIn');
+            window.localStorage.removeItem('authMode');
+            window.localStorage.removeItem('signupData');
+
+            const isNew = data.isNewUserCreated;
+
+            toast({
+              title: isNew ? "Account Created!" : "Welcome back!",
+              description: isNew ? "Your account has been successfully created." : "Successfully authenticated with Magic Link",
+            });
+            setLocation("/dashboard");
+          })
+          .catch((error) => {
+            console.error("Magic Link Error", error);
+            toast({
+              title: "Authentication Failed",
+              description: error.message || "Invalid or expired link",
+              variant: "destructive",
+            });
+          })
+          .finally(() => setIsLoading(false));
+      }
+    }
+  }, [setLocation, toast]);
+
   // Sign In state
   const [signInStep, setSignInStep] = useState<AuthStep>("form");
   const [signInEmail, setSignInEmail] = useState("");
-  
+
   // Sign Up state
   const [signUpStep, setSignUpStep] = useState<AuthStep>("form");
   const [signUpData, setSignUpData] = useState({ username: "", email: "" });
@@ -57,104 +122,40 @@ export default function LoginPage() {
     },
   });
 
-  // Handle email link sign-in when page loads (after user clicks the link in email)
-  useEffect(() => {
-    const handleEmailLinkSignIn = async () => {
-      if (isEmailLink(window.location.href)) {
-        setIsLoading(true);
-        let email = window.localStorage.getItem('emailForSignIn');
-        
-        if (!email) {
-          email = window.prompt('Please provide your email for confirmation');
-        }
-        
-        if (email) {
-          try {
-            const result = await completeEmailSignIn(email, window.location.href);
-            const user = result.user;
-            
-            const storedSignupData = window.localStorage.getItem('signupData');
-            const isNewUser = storedSignupData !== null;
-            const parsedSignupData = storedSignupData ? JSON.parse(storedSignupData) : null;
-            
-            const res = await apiRequest("POST", "/api/auth/firebase-email", {
-              email: user.email,
-              username: parsedSignupData?.username || user.email?.split('@')[0],
-              firebaseUid: user.uid,
-              isNewUser,
-            });
-            const data = await res.json();
-            
-            if (res.ok) {
-              localStorage.setItem("token", data.token);
-              localStorage.setItem("user", JSON.stringify(data.user));
-              window.localStorage.removeItem('signupData');
-              
-              toast({
-                title: isNewUser ? "Account Created!" : "Welcome back!",
-                description: isNewUser 
-                  ? "Your account has been created successfully."
-                  : "You have been logged in successfully.",
-              });
-              
-              window.history.replaceState({}, document.title, window.location.pathname);
-              setLocation("/dashboard");
-            } else {
-              toast({
-                title: "Error",
-                description: data.message || "Could not complete sign in",
-                variant: "destructive",
-              });
-            }
-          } catch (error: any) {
-            console.error("Email link sign-in error:", error);
-            let errorMessage = "Could not complete sign in. The link may have expired.";
-            
-            if (error.code === "auth/invalid-action-code") {
-              errorMessage = "This sign-in link has expired or already been used. Please request a new one.";
-            } else if (error.code === "auth/expired-action-code") {
-              errorMessage = "This sign-in link has expired. Please request a new one.";
-            }
-            
-            toast({
-              title: "Sign In Failed",
-              description: errorMessage,
-              variant: "destructive",
-            });
-          }
-        }
-        setIsLoading(false);
-      }
-    };
-    
-    handleEmailLinkSignIn();
-  }, []);
+  // NOTE: magic-link email flows removed in favor of OTP-based flows
 
   // Sign In - Send Magic Link
   const handleSignIn = async (data: z.infer<typeof signInEmailSchema>) => {
     setIsLoading(true);
     try {
+      // Check if user exists first
+      const checkRes = await apiRequest("POST", "/api/auth/check-email", { email: data.email });
+      const checkData = await checkRes.json();
+
+      if (!checkData.exists) {
+        toast({
+          title: "Account not found",
+          description: "No account found with this email. Please create an account first.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
+      }
+
       await sendEmailLink(data.email);
+      window.localStorage.setItem('authMode', 'signin');
       setSignInEmail(data.email);
-      setSignInStep("sent");
-      
+      setSignInStep("emailSent");
+
       toast({
-        title: "Check your email!",
-        description: `We've sent a magic link to ${data.email}. Click the link to sign in.`,
+        title: "Magic Link Sent!",
+        description: `We've sent a sign-in link to ${data.email}.`,
       });
     } catch (error: any) {
-      console.error("Send email link error:", error);
-      let errorMessage = "Could not send sign-in link. Please try again.";
-      
-      if (error.code === "auth/invalid-email") {
-        errorMessage = "Please enter a valid email address.";
-      } else if (error.code === "auth/quota-exceeded") {
-        errorMessage = "Too many requests. Please try again later.";
-      }
-      
+      console.error("Send Link error:", error);
       toast({
         title: "Error",
-        description: errorMessage,
+        description: error.message || "Could not send login link. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -169,7 +170,7 @@ export default function LoginPage() {
       // First check if email already exists
       const checkRes = await apiRequest("POST", "/api/auth/check-email", { email: data.email });
       const checkData = await checkRes.json();
-      
+
       if (checkData.exists) {
         toast({
           title: "Account already exists",
@@ -179,33 +180,29 @@ export default function LoginPage() {
         setIsLoading(false);
         return;
       }
-      
-      window.localStorage.setItem('signupData', JSON.stringify({
-        username: data.username,
-        email: data.email,
-      }));
-      
+
+      // store signup data locally for use after verify if needed, 
+      // though for magic link we mostly need the email (handled by firebase)
+      // and username (which we should cache to update profile later if needed, but existing backend handles it via 'username' param if sent?)
+      // Wait, completeEmailSignIn doesn't pass username. 
+      // But we can store it in localStorage and use it in useEffect.
+      window.localStorage.setItem('signupUsername', data.username);
+
       await sendEmailLink(data.email);
+      window.localStorage.setItem('authMode', 'signup');
+
       setSignUpData({ username: data.username, email: data.email });
-      setSignUpStep("sent");
-      
+      setSignUpStep("emailSent"); // Reusing emailSent step for Sign Up too
+
       toast({
-        title: "Check your email!",
-        description: `We've sent a verification link to ${data.email}. Click the link to complete your registration.`,
+        title: "Magic Link Sent!",
+        description: `We've sent a verification link to ${data.email}.`,
       });
     } catch (error: any) {
-      console.error("Send email link error:", error);
-      let errorMessage = "Could not send sign-up link. Please try again.";
-      
-      if (error.code === "auth/invalid-email") {
-        errorMessage = "Please enter a valid email address.";
-      } else if (error.code === "auth/quota-exceeded") {
-        errorMessage = "Too many requests. Please try again later.";
-      }
-      
+      console.error("Send Link error:", error);
       toast({
         title: "Error",
-        description: errorMessage,
+        description: error.message || "Could not send verification link.",
         variant: "destructive",
       });
     } finally {
@@ -213,24 +210,60 @@ export default function LoginPage() {
     }
   };
 
-  // Resend magic link
-  const resendEmailLink = async (email: string) => {
+  // Resend Magic Link (Sign In) or OTP (Sign Up)
+  const resendAction = async (email: string, isSignUp: boolean) => {
+    // Resend Magic Link for both flows now
     setIsLoading(true);
     try {
       await sendEmailLink(email);
       toast({
-        title: "Email sent!",
+        title: "Link Sent!",
         description: `We've sent another magic link to ${email}.`,
       });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Could not resend email. Please try again.",
-        variant: "destructive",
-      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // OTP verification UI component
+  const OTPVerificationUI = ({ email, onBack, isSignUp = false }: { email: string; onBack: () => void; isSignUp?: boolean }) => {
+    const [code, setCode] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    const verify = async () => {
+      setLoading(true);
+      try {
+        const res = await apiRequest("POST", "/api/otp/verify", { email, otp: code });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Invalid OTP');
+
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        window.localStorage.removeItem('signupData');
+        toast({ title: isSignUp ? 'Account created' : 'Signed in', description: data.message });
+        setLocation("/dashboard");
+      } catch (err: any) {
+        toast({ title: 'Error', description: err.message || 'OTP verification failed', variant: 'destructive' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    return (
+      <div className="space-y-4 py-4">
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">Enter the 6-digit code sent to</p>
+          <p className="font-medium">{email}</p>
+        </div>
+        <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter OTP" />
+        <div className="flex gap-2">
+          <Button onClick={verify} className="flex-1" disabled={loading}>{loading ? 'Verifying...' : 'Verify OTP'}</Button>
+          <Button variant="ghost" onClick={onBack}>Use different email</Button>
+        </div>
+      </div>
+    );
   };
 
   // Reset flows
@@ -253,7 +286,7 @@ export default function LoginPage() {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
-      
+
       const res = await apiRequest("POST", "/api/auth/google", {
         email: user.email,
         username: user.displayName || user.email?.split('@')[0],
@@ -261,12 +294,16 @@ export default function LoginPage() {
         photoURL: user.photoURL,
       });
       const data = await res.json();
-      
+
       if (res.ok) {
         localStorage.setItem("token", data.token);
         localStorage.setItem("user", JSON.stringify(data.user));
+
+        // Set dark mode as default upon login
+        localStorage.setItem("theme", "dark");
+        document.documentElement.classList.add("dark");
         toast({
-          title: "Welcome!",
+          title: data.isNewUserCreated ? "Account Created!" : "Welcome Back!",
           description: `Signed in as ${user.displayName || user.email}`,
         });
         setLocation("/dashboard");
@@ -279,7 +316,7 @@ export default function LoginPage() {
       }
     } catch (error: any) {
       console.error("Google sign-in error:", error);
-      
+
       let errorMessage = "Could not sign in with Google. Please try again.";
       if (error.code === "auth/popup-closed-by-user") {
         errorMessage = "Sign-in popup was closed. Please try again.";
@@ -290,7 +327,7 @@ export default function LoginPage() {
       } else if (error.code === "auth/network-request-failed") {
         errorMessage = "Network error. Please check your connection.";
       }
-      
+
       toast({
         title: "Sign In Failed",
         description: errorMessage,
@@ -302,9 +339,9 @@ export default function LoginPage() {
   };
 
   // Email Sent Success UI
-  const EmailSentUI = ({ email, onResend, onBack, isSignUp = false }: { 
-    email: string; 
-    onResend: () => void; 
+  const EmailSentUI = ({ email, onResend, onBack, isSignUp = false }: {
+    email: string;
+    onResend: () => void;
     onBack: () => void;
     isSignUp?: boolean;
   }) => (
@@ -321,22 +358,22 @@ export default function LoginPage() {
       </div>
       <div className="bg-muted/50 rounded-lg p-4 text-sm">
         <p className="text-muted-foreground">
-          Click the link in the email to {isSignUp ? "complete your registration" : "sign in"}. 
+          Click the link in the email to {isSignUp ? "complete your registration" : "sign in"}.
           The link will expire in 1 hour.
         </p>
       </div>
       <div className="space-y-2 pt-2">
-        <Button 
-          variant="outline" 
-          onClick={onResend} 
+        <Button
+          variant="secondary"
+          onClick={onResend}
           disabled={isLoading}
-          className="w-full"
+          className="w-full border"
         >
           {isLoading ? "Sending..." : "Resend Magic Link"}
         </Button>
-        <Button 
-          variant="ghost" 
-          onClick={onBack} 
+        <Button
+          variant="ghost"
+          onClick={onBack}
           className="w-full"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -351,10 +388,10 @@ export default function LoginPage() {
       {/* Decorative elements */}
       <div className="absolute top-20 left-10 w-32 h-32 bg-primary/5 rounded-full blur-3xl" />
       <div className="absolute bottom-20 right-10 w-40 h-40 bg-primary/10 rounded-full blur-3xl" />
-      
+
       <Card className="w-full max-w-md relative overflow-hidden">
         <div className="absolute top-0 right-0 w-20 h-20 bg-gradient-to-br from-primary/20 to-transparent" />
-        
+
         <CardHeader className="text-center space-y-4">
           <Link href="/" className="flex justify-center">
             <Logo size="lg" />
@@ -403,15 +440,19 @@ export default function LoginPage() {
                       {isLoading ? "Sending..." : "Send Magic Link"}
                     </Button>
                     <p className="text-xs text-muted-foreground text-center">
-                      We'll send you a magic link to sign in instantly - no password required!
+                      We'll send you a magic link to sign in securely without a password.
                     </p>
                   </form>
                 </Form>
+              ) : signInStep === 'otp' ? (
+                // Should not happen for login anymore, but kept for type safety
+                <OTPVerificationUI email={signInEmail} onBack={resetSignInFlow} isSignUp={false} />
               ) : (
-                <EmailSentUI 
-                  email={signInEmail} 
-                  onResend={() => resendEmailLink(signInEmail)} 
+                <EmailSentUI
+                  email={signInEmail}
+                  onResend={() => resendAction(signInEmail, false)}
                   onBack={resetSignInFlow}
+                  isSignUp={false}
                 />
               )}
 
@@ -424,16 +465,16 @@ export default function LoginPage() {
 
               <Button
                 type="button"
-                variant="outline"
-                className="w-full"
+                variant="secondary"
+                className="w-full border"
                 onClick={handleGoogleSignIn}
                 disabled={isLoading}
               >
                 <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                 </svg>
                 Continue with Google
               </Button>
@@ -481,14 +522,16 @@ export default function LoginPage() {
                       {isLoading ? "Sending..." : "Send Verification Link"}
                     </Button>
                     <p className="text-xs text-muted-foreground text-center">
-                      We'll send you a magic link to verify your email and create your account
+                      We'll send you a magic link to verify your email and create your account.
                     </p>
                   </form>
                 </Form>
+              ) : signUpStep === 'otp' ? (
+                <OTPVerificationUI email={signUpData.email} onBack={resetSignUpFlow} isSignUp={true} />
               ) : (
-                <EmailSentUI 
-                  email={signUpData.email} 
-                  onResend={() => resendEmailLink(signUpData.email)} 
+                <EmailSentUI
+                  email={signUpData.email}
+                  onResend={() => resendAction(signUpData.email, true)}
                   onBack={resetSignUpFlow}
                   isSignUp={true}
                 />
@@ -503,16 +546,16 @@ export default function LoginPage() {
 
               <Button
                 type="button"
-                variant="outline"
-                className="w-full"
+                variant="secondary"
+                className="w-full border"
                 onClick={handleGoogleSignIn}
                 disabled={isLoading}
               >
                 <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                 </svg>
                 Sign up with Google
               </Button>

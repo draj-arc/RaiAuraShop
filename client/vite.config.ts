@@ -8,5 +8,12 @@ export default defineConfig({
       "@": "/src",
       "@shared": "/shared"
     }
+  },
+  server: {
+    port: 4000,
+    host: true,
+    proxy: {
+      '/api': 'http://localhost:5000'
+    }
   }
 });

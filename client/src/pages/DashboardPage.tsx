@@ -3,14 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import { Order } from "@shared/schema";
-import { 
-  Package, 
-  Settings, 
-  LogOut, 
-  ShoppingBag, 
-  Heart, 
-  MapPin, 
-  User, 
+import {
+  Package,
+  Settings,
+  LogOut,
+  ShoppingBag,
+  Heart,
+  MapPin,
+  User,
   HelpCircle,
   CreditCard,
   Bell,
@@ -24,6 +24,8 @@ import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
+import { OrderWithItems } from "@shared/schema";
 
 interface UserData {
   id: string;
@@ -44,7 +46,7 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const { data: orders = [] } = useQuery<Order[]>({
+  const { data: orders = [] } = useQuery<OrderWithItems[]>({
     queryKey: ["/api/orders"],
   });
 
@@ -73,7 +75,7 @@ export default function DashboardPage() {
               <Button className="hover-elevate">Sign In</Button>
             </Link>
             <Link href="/shop">
-              <Button variant="outline" className="hover-elevate">Continue Shopping</Button>
+              <Button variant="secondary" className="hover-elevate border">Continue Shopping</Button>
             </Link>
           </div>
         </div>
@@ -203,13 +205,13 @@ export default function DashboardPage() {
                   </Button>
                 </Link>
                 <Link href="/admin">
-                  <Button variant="outline" className="hover-elevate">
+                  <Button variant="secondary" className="hover-elevate border">
                     <Settings className="h-4 w-4 mr-2" />
                     Manage Categories
                   </Button>
                 </Link>
                 <Link href="/shop">
-                  <Button variant="outline" className="hover-elevate">
+                  <Button variant="secondary" className="hover-elevate border">
                     <ShoppingBag className="h-4 w-4 mr-2" />
                     View Store
                   </Button>
@@ -247,7 +249,7 @@ export default function DashboardPage() {
               <p className="text-muted-foreground">Welcome back, {user.username}</p>
             </div>
           </div>
-          <Button variant="outline" onClick={handleLogout} className="hover-elevate">
+          <Button variant="secondary" onClick={handleLogout} className="hover-elevate border">
             <LogOut className="h-4 w-4 mr-2" />
             Logout
           </Button>
@@ -405,40 +407,64 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {orders.map((order) => (
-                  <div
-                    key={order.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover-elevate"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Package className="h-5 w-5 text-primary" />
+                <Accordion type="single" collapsible className="space-y-4">
+                  {orders.map((order) => (
+                    <AccordionItem key={order.id} value={order.id} className="border rounded-lg overflow-hidden bg-white/50 px-4">
+                      <div className="flex items-center justify-between py-4">
+                        <div className="flex items-center gap-4">
+                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                            <Package className="h-5 w-5 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-medium">Order #{order.id.slice(0, 8)}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {new Date(order.createdAt).toLocaleDateString('en-IN', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric'
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right mr-2 hidden sm:block">
+                            <p className="font-semibold text-primary">₹{order.total}</p>
+                            <Badge
+                              variant={order.status === 'delivered' ? 'default' : 'secondary'}
+                              className="capitalize"
+                            >
+                              {order.status}
+                            </Badge>
+                          </div>
+                          <AccordionTrigger className="hover:no-underline py-0" />
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium">Order #{order.id.slice(0, 8)}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {new Date(order.createdAt).toLocaleDateString('en-IN', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric'
-                          })}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right flex items-center gap-4">
-                      <div>
-                        <p className="font-semibold text-primary">₹{order.total}</p>
-                        <Badge 
-                          variant={order.status === 'delivered' ? 'default' : 'secondary'}
-                          className="capitalize"
-                        >
-                          {order.status}
-                        </Badge>
-                      </div>
-                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                  </div>
-                ))}
+                      <AccordionContent>
+                        <Separator className="mb-4" />
+                        <div className="space-y-3 pb-2">
+                          <h4 className="text-sm font-medium text-muted-foreground">Order Items</h4>
+                          {order.items && order.items.length > 0 ? (
+                            order.items.map((item) => (
+                              <div key={item.id} className="flex justify-between items-center text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-1 h-1 rounded-full bg-primary" />
+                                  <span>{item.productName} <span className="text-muted-foreground">x{item.quantity}</span></span>
+                                </div>
+                                <span className="font-medium">₹{item.productPrice}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-muted-foreground italic">No details available</p>
+                          )}
+                          <div className="flex justify-between items-center pt-2 mt-2 border-t font-medium sm:hidden">
+                            <span>Total</span>
+                            <span className="text-primary">₹{order.total}</span>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
               </div>
             )}
           </CardContent>

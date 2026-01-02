@@ -17,12 +17,32 @@ function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-const stripe = process.env.STRIPE_SECRET_KEY 
+const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-09-30.clover" })
   : null;
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  
+  // Middleware to check if user is admin
+  const checkAdmin = async (req: any, res: any, next: any) => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+      const user = await storage.getUser(decoded.id);
+      if (!user || !user.isAdmin) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      req.user = user;
+      next();
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+  };
+
+
   app.get("/api/products", async (req, res) => {
     try {
       const products = await storage.getProducts();
@@ -53,7 +73,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/products", async (req, res) => {
+  app.post("/api/products", checkAdmin, async (req, res) => {
     try {
       const data = insertProductSchema.parse(req.body);
       const product = await storage.createProduct(data);
@@ -63,7 +83,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/products/:id", async (req, res) => {
+  app.put("/api/products/:id", checkAdmin, async (req, res) => {
     try {
       const product = await storage.updateProduct(req.params.id, req.body);
       if (!product) {
@@ -75,7 +95,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/products/:id", async (req, res) => {
+  app.delete("/api/products/:id", checkAdmin, async (req, res) => {
     try {
       await storage.deleteProduct(req.params.id);
       res.json({ message: "Product deleted" });
@@ -93,7 +113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/categories", async (req, res) => {
+  app.post("/api/categories", checkAdmin, async (req, res) => {
     try {
       const data = insertCategorySchema.parse(req.body);
       const category = await storage.createCategory(data);
@@ -103,7 +123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/categories/:id", async (req, res) => {
+  app.put("/api/categories/:id", checkAdmin, async (req, res) => {
     try {
       const category = await storage.updateCategory(req.params.id, req.body);
       if (!category) {
@@ -115,7 +135,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/categories/:id", async (req, res) => {
+  app.delete("/api/categories/:id", checkAdmin, async (req, res) => {
     try {
       await storage.deleteCategory(req.params.id);
       res.json({ message: "Category deleted" });
@@ -180,9 +200,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/orders", async (req, res) => {
     try {
-      const userId = req.query.userId as string | undefined;
-      const orders = await storage.getOrders(userId);
-      res.json(orders);
+      // Require authentication for order access. Admins may view all orders.
+      const token = req.headers.authorization?.split(" ")[1];
+      const requestedUserId = req.query.userId as string | undefined;
+
+      if (!token && !requestedUserId) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      let targetUserId: string | undefined;
+
+      if (token) {
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+          const requester = await storage.getUser(decoded.id);
+          if (!requester) {
+            return res.status(401).json({ message: "Invalid token" });
+          }
+
+          if (requester.isAdmin) {
+            // Admin can request all orders (no userId) or specify a userId
+            if (requestedUserId && requestedUserId !== "all") {
+              targetUserId = requestedUserId;
+            } else {
+              targetUserId = undefined; // fetch all orders
+            }
+          } else {
+            // Non-admins can only see their own orders
+            targetUserId = requester.id;
+          }
+        } catch (err) {
+          return res.status(401).json({ message: "Invalid token" });
+        }
+      } else {
+        // No token provided but a userId was requested -> not allowed
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+
+      const orders = await storage.getOrders(targetUserId);
+      const ordersWithItems = await Promise.all(orders.map(async (order) => {
+        const items = await storage.getOrderItems(order.id);
+        return { ...order, items };
+      }));
+      res.json(ordersWithItems);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -191,7 +251,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/orders", async (req, res) => {
     try {
       const { order, items } = req.body;
-      
+
+      // If request is authenticated, attach the user's id to the order
+      const token = req.headers.authorization?.split(" ")[1];
+      let userIdFromToken: string | undefined;
+      if (token) {
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+          const user = await storage.getUser(decoded.id);
+          if (user) userIdFromToken = user.id;
+        } catch (err) {
+          // ignore invalid token for now - proceed without userId (guest checkout)
+        }
+      }
+
       // Validate stock for each item before creating order
       for (const item of items) {
         const product = await storage.getProductById(item.productId);
@@ -199,15 +272,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: `Product not found: ${item.productName}` });
         }
         if (product.stock < item.quantity) {
-          return res.status(400).json({ 
-            message: `Insufficient stock for ${item.productName}. Available: ${product.stock}, Requested: ${item.quantity}` 
+          return res.status(400).json({
+            message: `Insufficient stock for ${item.productName}. Available: ${product.stock}, Requested: ${item.quantity}`
           });
         }
       }
 
-      const validatedOrder = insertOrderSchema.parse(order);
+      // Attach userId to order payload if available
+      const orderWithUser: any = { ...(order as any) };
+      if (userIdFromToken) {
+        orderWithUser.userId = userIdFromToken;
+      }
+
+      const validatedOrder = insertOrderSchema.parse(orderWithUser);
       const newOrder = await storage.createOrder(validatedOrder, items);
-      
+
       // Reduce stock for each ordered item
       for (const item of items) {
         const product = await storage.getProductById(item.productId);
@@ -217,14 +296,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
-      
+
       res.json(newOrder);
     } catch (error: any) {
       res.status(400).json({ message: error.message });
     }
   });
 
-  app.put("/api/orders/:id/status", async (req, res) => {
+  app.put("/api/orders/:id/status", checkAdmin, async (req, res) => {
     try {
       const { status } = req.body;
       const order = await storage.updateOrderStatus(req.params.id, status);
@@ -240,7 +319,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/register", async (req, res) => {
     try {
       const data = insertUserSchema.parse(req.body);
-      
+
       const existingUser = await storage.getUserByEmail(data.email);
       if (existingUser) {
         return res.status(400).json({ message: "Email already registered" });
@@ -253,10 +332,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
-      
-      res.json({ 
+
+      res.json({
         user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
-        token 
+        token
       });
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -266,7 +345,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/login", async (req, res) => {
     try {
       const data = loginUserSchema.parse(req.body);
-      
+
       const user = await storage.getUserByEmail(data.email);
       if (!user) {
         return res.status(401).json({ message: "Invalid credentials" });
@@ -278,10 +357,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
-      
-      res.json({ 
+
+      res.json({
         user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
-        token 
+        token
       });
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -297,7 +376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
       const user = await storage.getUser(decoded.id);
-      
+
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -312,13 +391,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/otp/request", async (req, res) => {
     try {
       const { email, isNewUser, username } = req.body;
-      
+
       if (!email) {
         return res.status(400).json({ message: "Email is required" });
       }
 
       const existingUser = await storage.getUserByEmail(email);
-      
+
       // For signup, check if user already exists
       if (isNewUser && existingUser) {
         return res.status(400).json({ message: "Email already registered. Please sign in instead." });
@@ -331,20 +410,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const otp = generateOTP();
       const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
-      
+
       // Store OTP
       otpStore.set(email, { otp, expiresAt, isNewUser, username });
-      
+
       // Send OTP via email
       const emailSent = await sendOTPEmail(email, otp);
-      
+
       // Log OTP for development/debugging
       console.log(`\n📧 OTP for ${email}: ${otp}\n`);
-      
-      res.json({ 
+
+      res.json({
         message: emailSent ? "OTP sent to your email" : "OTP generated (check console)",
         // Include demo_otp only in development for testing
-        demo_otp: process.env.NODE_ENV === 'production' ? undefined : otp 
+        demo_otp: process.env.NODE_ENV === 'production' ? undefined : otp
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -355,13 +434,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/otp/verify", async (req, res) => {
     try {
       const { email, otp } = req.body;
-      
+
       if (!email || !otp) {
         return res.status(400).json({ message: "Email and OTP are required" });
       }
 
       const storedData = otpStore.get(email);
-      
+
       if (!storedData) {
         return res.status(400).json({ message: "OTP expired or not requested. Please request a new OTP." });
       }
@@ -379,13 +458,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       otpStore.delete(email);
 
       let user = await storage.getUserByEmail(email);
-      
+
       // If new user signup via OTP
       if (!user && storedData.isNewUser) {
         // Create user with a random password (they'll use OTP to login)
         const randomPassword = Math.random().toString(36).slice(-12);
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
-        
+
         user = await storage.createUser({
           username: storedData.username || email.split('@')[0],
           email,
@@ -398,8 +477,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
-      
-      res.json({ 
+
+      res.json({
         user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
         token,
         message: storedData.isNewUser ? "Account created successfully!" : "Logged in successfully!"
@@ -413,32 +492,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/google", async (req, res) => {
     try {
       const { email, username, googleId, photoURL } = req.body;
-      
+
       if (!email) {
         return res.status(400).json({ message: "Email is required" });
       }
 
       let user = await storage.getUserByEmail(email);
-      
+
       if (!user) {
         // Create new user from Google auth
         const randomPassword = Math.random().toString(36).slice(-12);
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
-        
+
         user = await storage.createUser({
           username: username || email.split('@')[0],
           email,
           password: hashedPassword,
         });
-        
+
         console.log(`✅ New Google user created: ${email}`);
       }
 
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
-      
-      res.json({ 
+
+      res.json({
         user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
-        token 
+        token
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -449,35 +528,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/phone", async (req, res) => {
     try {
       const { phone, username, firebaseUid } = req.body;
-      
+
       if (!phone || !firebaseUid) {
         return res.status(400).json({ message: "Phone and Firebase UID are required" });
       }
 
       // Use phone number as a unique identifier - create email-like identifier
       const phoneEmail = `${phone.replace(/\+/g, '').replace(/\s/g, '')}@phone.raiaurashop.com`;
-      
+
       let user = await storage.getUserByEmail(phoneEmail);
-      
+
       if (!user) {
         // Create new user from phone auth
         const randomPassword = Math.random().toString(36).slice(-12);
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
-        
+
         user = await storage.createUser({
           username: username || `User_${phone.slice(-4)}`,
           email: phoneEmail,
           password: hashedPassword,
         });
-        
+
         console.log(`✅ New phone user created: ${phone}`);
       }
 
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
-      
-      res.json({ 
+
+      res.json({
         user: { id: user.id, username: user.username, email: user.email, phone, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
-        token 
+        token
       });
     } catch (error: any) {
       console.error("Phone auth error:", error);
@@ -489,7 +568,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/check-email", async (req, res) => {
     try {
       const { email } = req.body;
-      
+
       if (!email) {
         return res.status(400).json({ message: "Email is required" });
       }
@@ -506,42 +585,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/firebase-email", async (req, res) => {
     try {
       const { email, username, firebaseUid, isNewUser } = req.body;
-      
       if (!email || !firebaseUid) {
         return res.status(400).json({ message: "Email and Firebase UID are required" });
       }
 
-      let user = await storage.getUserByEmail(email);
-      
-      // If this is a signup attempt and user already exists, reject it
-      if (isNewUser && user) {
-        return res.status(400).json({ 
-          message: "An account with this email already exists. Please sign in instead." 
-        });
+      // Always check by Firebase UID first
+      let user = await storage.getUserByFirebaseUid(firebaseUid);
+      // If not found, fallback to email
+      if (!user) {
+        user = await storage.getUserByEmail(email);
       }
-      
+
+      // If user exists (whether isNewUser is true or false), we should log them in.
+      // If we have a user by email but they don't have the firebaseUid set (e.g. created via OTP),
+      // update the user to include the firebaseUid for future logins.
+      if (user && user.firebaseUid !== firebaseUid) {
+        await storage.updateUser(user.id, { firebaseUid });
+        console.log(`✅ Updated user ${user.email} with new Firebase UID`);
+        // Refresh user object
+        const updatedUser = await storage.getUser(user.id);
+        if (updatedUser) user = updatedUser;
+      }
+
+      let isNewUserCreated = false;
+
       if (!user) {
         // Create new user from Firebase email link auth
         const randomPassword = Math.random().toString(36).slice(-12);
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
-        
         user = await storage.createUser({
           username: username || email.split('@')[0],
           email,
           password: hashedPassword,
+          firebaseUid,
         });
-        
+        isNewUserCreated = true;
         console.log(`✅ New Firebase email user created: ${email}`);
       }
 
       const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
-      
-      res.json({ 
+      res.json({
         user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
-        token 
+        token,
+        isNewUserCreated
       });
     } catch (error: any) {
       console.error("Firebase email auth error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/auth/google", async (req, res) => {
+    try {
+      const { email, username, googleId } = req.body;
+      if (!email || !googleId) {
+        return res.status(400).json({ message: "Email and Google UID are required" });
+      }
+
+      // Check by Firebase UID (Google ID is Firebase UID)
+      let user = await storage.getUserByFirebaseUid(googleId);
+
+      if (!user) {
+        user = await storage.getUserByEmail(email);
+      }
+
+      if (user && user.firebaseUid !== googleId) {
+        await storage.updateUser(user.id, { firebaseUid: googleId });
+        const updatedUser = await storage.getUser(user.id);
+        if (updatedUser) user = updatedUser;
+      }
+
+      let isNewUserCreated = false;
+
+      if (!user) {
+        const randomPassword = Math.random().toString(36).slice(-12);
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        user = await storage.createUser({
+          username: username || email.split('@')[0],
+          email,
+          password: hashedPassword,
+          firebaseUid: googleId,
+        });
+        isNewUserCreated = true;
+      }
+
+      const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
+      res.json({
+        user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, role: user.isAdmin ? 'admin' : 'user' },
+        token,
+        isNewUserCreated
+      });
+    } catch (error: any) {
+      console.error("Google auth error:", error);
       res.status(500).json({ message: error.message });
     }
   });
@@ -566,7 +701,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { userId } = req.params;
       const wishlistItems = await storage.getWishlist(userId);
-      
+
       // Get product details for each wishlist item
       const itemsWithProducts = await Promise.all(
         wishlistItems.map(async (item) => {
@@ -577,7 +712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
         })
       );
-      
+
       res.json(itemsWithProducts);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -587,7 +722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/wishlist", async (req, res) => {
     try {
       const { userId, productId } = req.body;
-      
+
       if (!userId || !productId) {
         return res.status(400).json({ message: "User ID and Product ID are required" });
       }

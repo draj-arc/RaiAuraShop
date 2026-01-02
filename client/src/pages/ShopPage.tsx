@@ -9,7 +9,7 @@ export default function ShopPage() {
   const [location] = useLocation();
   const searchParams = new URLSearchParams(window.location.search);
   const categoryFilter = searchParams.get("category");
-  
+
   const [selectedCategory, setSelectedCategory] = useState<string | null>(categoryFilter);
 
   const { data: categories = [] } = useQuery<Category[]>({
@@ -22,9 +22,9 @@ export default function ShopPage() {
 
   const filteredProducts = selectedCategory
     ? products.filter((p) => {
-        const category = categories.find((c) => c.id === p.categoryId);
-        return category?.slug === selectedCategory;
-      })
+      const category = categories.find((c) => c.id === p.categoryId);
+      return category?.slug === selectedCategory;
+    })
     : products;
 
   return (
@@ -41,7 +41,7 @@ export default function ShopPage() {
 
         <div className="flex flex-wrap gap-3 mb-8">
           <Button
-            variant={selectedCategory === null ? "default" : "outline"}
+            variant="default"
             onClick={() => setSelectedCategory(null)}
             className="hover-elevate active-elevate-2"
             data-testid="button-category-all"
@@ -51,7 +51,7 @@ export default function ShopPage() {
           {categories.map((category) => (
             <Button
               key={category.id}
-              variant={selectedCategory === category.slug ? "default" : "outline"}
+              variant="default"
               onClick={() => setSelectedCategory(category.slug)}
               className="hover-elevate active-elevate-2"
               data-testid={`button-category-${category.slug}`}
@@ -62,7 +62,7 @@ export default function ShopPage() {
         </div>
 
         {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
             {[...Array(8)].map((_, i) => (
               <div key={i} className="aspect-square bg-muted rounded-lg animate-pulse" />
             ))}
@@ -72,7 +72,7 @@ export default function ShopPage() {
             <p className="text-muted-foreground text-lg">No products found</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
             {filteredProducts.map((product) => (
               <ProductCard
                 key={product.id}
