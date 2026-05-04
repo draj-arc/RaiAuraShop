@@ -4,14 +4,18 @@ import { Resend } from 'resend';
 // Free tier: 100 emails/day, 3000 emails/month
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 
-// From email - use Resend's default or your verified domain
-const FROM_EMAIL = process.env.FROM_EMAIL || 'Rai Aura <onboarding@resend.dev>';
+// From email - use your verified domain
+const FROM_EMAIL = process.env.FROM_EMAIL || 'Rai Aura <noreply@raiaura.in>';
 
 // Initialize Resend
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 // Send OTP email
-export async function sendOTPEmail(to: string, otp: string): Promise<boolean> {
+export async function sendOTPEmail(to: string, otp: string, apiKey?: string): Promise<{ success: boolean; error?: string }> {
+  // Use passed key (Cloudflare) or process.env (Node.js)
+  const key = apiKey || RESEND_API_KEY;
+  const client = key ? new Resend(key) : null;
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -60,14 +64,16 @@ export async function sendOTPEmail(to: string, otp: string): Promise<boolean> {
   `;
 
   // If Resend not configured, log OTP to console
-  if (!resend) {
+  if (!client) {
     console.log('⚠️ RESEND_API_KEY not configured. Get a free API key at https://resend.com');
     console.log(`\n📧 OTP for ${to}: ${otp}\n`);
-    return true; // Return true so the flow continues
+    // In production/deployed environment, we want to know if it failed.
+    // If apiKey (from Cloudflare env) was expected but missing, this should fail.
+    return { success: false, error: 'RESEND_API_KEY is missing/undefined' };
   }
 
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await client.emails.send({
       from: FROM_EMAIL,
       to: [to],
       subject: '🔐 Your Rai Aura Verification Code',
@@ -78,25 +84,25 @@ export async function sendOTPEmail(to: string, otp: string): Promise<boolean> {
     if (error) {
       console.error(`❌ Failed to send OTP email to ${to}:`, error.message);
       console.log(`\n📧 OTP for ${to}: ${otp}\n`);
-      return false;
+      return { success: false, error: error.message };
     }
 
     console.log(`✅ OTP email sent to ${to} (ID: ${data?.id})`);
-    return true;
+    return { success: true };
   } catch (error: any) {
     console.error(`❌ Failed to send OTP email to ${to}:`, error.message);
     console.log(`\n📧 OTP for ${to}: ${otp}\n`);
-    return false;
+    return { success: false, error: error.message };
   }
 }
 
 // Send order confirmation email
 export async function sendOrderConfirmationEmail(
-  to: string, 
-  orderDetails: { 
-    orderId: string; 
-    customerName: string; 
-    items: { name: string; quantity: number; price: string }[]; 
+  to: string,
+  orderDetails: {
+    orderId: string;
+    customerName: string;
+    items: { name: string; quantity: number; price: string }[];
     total: string;
     address: string;
   }

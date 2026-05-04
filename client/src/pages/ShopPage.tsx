@@ -17,7 +17,7 @@ export default function ShopPage() {
   });
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products", selectedCategory],
+    queryKey: ["/api/products"],
   });
 
   const filteredProducts = selectedCategory
@@ -41,9 +41,9 @@ export default function ShopPage() {
 
         <div className="flex flex-wrap gap-3 mb-8">
           <Button
-            variant="default"
+            variant={selectedCategory === null ? "default" : "secondary"}
             onClick={() => setSelectedCategory(null)}
-            className="hover-elevate active-elevate-2"
+            className="hover-elevate active-elevate-2 font-medium"
             data-testid="button-category-all"
           >
             All Products
@@ -51,9 +51,9 @@ export default function ShopPage() {
           {categories.map((category) => (
             <Button
               key={category.id}
-              variant="default"
+              variant={selectedCategory === category.slug ? "default" : "secondary"}
               onClick={() => setSelectedCategory(category.slug)}
-              className="hover-elevate active-elevate-2"
+              className="hover-elevate active-elevate-2 font-medium"
               data-testid={`button-category-${category.slug}`}
             >
               {category.name}

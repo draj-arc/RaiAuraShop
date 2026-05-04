@@ -81,6 +81,15 @@ export const wishlistItems = pgTable("wishlist_items", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const otps = pgTable("otps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  otp: text("otp").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  isNewUser: boolean("is_new_user").default(false),
+  username: text("username"),
+});
+
 export const productsRelations = relations(products, ({ one, many }) => ({
   category: one(categories, {
     fields: [products.categoryId],
@@ -202,3 +211,10 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type WishlistItem = typeof wishlistItems.$inferSelect;
 
 export type OrderWithItems = Order & { items: OrderItem[] };
+
+export const insertOtpSchema = createInsertSchema(otps).omit({
+  id: true,
+});
+
+export type InsertOtp = z.infer<typeof insertOtpSchema>;
+export type Otp = typeof otps.$inferSelect;

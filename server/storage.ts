@@ -18,10 +18,12 @@ import {
   type InsertOrder,
   type OrderItem,
   type WishlistItem,
+  type Otp,
+  type InsertOtp,
 } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import { db } from "./firebase";
-import { collection, doc, getDoc, getDocs, query, where, addDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where, addDoc, updateDoc, deleteDoc } from "firebase/firestore/lite";
 
 // Using in-memory storage (no Firebase required)
 // Data will be lost on server restart - use Firebase/PostgreSQL for production
@@ -66,10 +68,41 @@ export interface IStorage {
   addToWishlist(userId: string, productId: string): Promise<WishlistItem>;
   removeFromWishlist(userId: string, productId: string): Promise<void>;
   isInWishlist(userId: string, productId: string): Promise<boolean>;
+
+  // OTP methods
+  saveOTP(otp: InsertOtp): Promise<void>;
+  getOTP(email: string): Promise<Otp | undefined>;
+  deleteOTP(email: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
+  private adminInitialized = false;
+
+  private async ensureAdminInitialized() {
+    if (this.adminInitialized) return;
+    const adminEmail = "raiaura.shop@gmail.com";
+    const adminPassword = "Deepraj@22";
+    // Check if admin exists
+    const q = query(collection(db, "users"), where("email", "==", adminEmail));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) {
+      const hashedPassword = await bcrypt.hash(adminPassword, 10);
+      const adminUser: User = {
+        id: "admin_1",
+        username: "RaiAura Admin",
+        email: adminEmail,
+        password: hashedPassword,
+        isAdmin: true,
+        firebaseUid: null,
+        createdAt: new Date()
+      };
+      await addDoc(collection(db, "users"), adminUser);
+      console.log("✅ Admin user initialized in Firestore");
+    }
+    this.adminInitialized = true;
+  }
   async getUser(id: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
     const docRef = doc(db, "users", id);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
@@ -79,6 +112,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
     const q = query(collection(db, "users"), where("username", "==", username));
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
@@ -89,6 +123,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
     const q = query(collection(db, "users"), where("email", "==", email));
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
@@ -99,6 +134,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByFirebaseUid(firebaseUid: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
     const q = query(collection(db, "users"), where("firebaseUid", "==", firebaseUid));
     const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
@@ -364,6 +400,42 @@ export class DatabaseStorage implements IStorage {
     const querySnapshot = await getDocs(q);
     return !querySnapshot.empty;
   }
+
+  // OTP methods for DatabaseStorage
+  async saveOTP(otp: InsertOtp): Promise<void> {
+    // Delete existing OTP for this email if any
+    await this.deleteOTP(otp.email);
+
+    // Create new OTP
+    // Ensure expiresAt is a Date object (schema defines it as timestamp)
+    await addDoc(collection(db, "otps"), {
+      ...otp,
+      expiresAt: new Date(otp.expiresAt)
+    });
+  }
+
+  async getOTP(email: string): Promise<Otp | undefined> {
+    const q = query(collection(db, "otps"), where("email", "==", email));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const doc = querySnapshot.docs[0];
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        // Firebase Timestamp to Date conversion if needed
+        expiresAt: data.expiresAt.toDate ? data.expiresAt.toDate() : new Date(data.expiresAt)
+      } as Otp;
+    }
+    return undefined;
+  }
+
+  async deleteOTP(email: string): Promise<void> {
+    const q = query(collection(db, "otps"), where("email", "==", email));
+    const querySnapshot = await getDocs(q);
+    const deletePromises = querySnapshot.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(deletePromises);
+  }
 }
 
 // In-memory storage implementation
@@ -507,20 +579,18 @@ class MemoryStorage implements IStorage {
     });
 
     console.log(`✅ Seed products loaded: ${seedProducts.length} products`);
-
-    // Initialize admin user synchronously
-    this.initializeAdminSync();
   }
 
-  private initializeAdminSync() {
+  private adminInitialized = false;
+  private async ensureAdminInitialized() {
+    if (this.adminInitialized) return;
+
     const adminEmail = "raiaura.shop@gmail.com";
     const adminPassword = "Deepraj@22";
 
-    // Check if admin already exists
     const existingAdmin = Array.from(this.users.values()).find(u => u.email === adminEmail);
     if (!existingAdmin) {
-      // Use synchronous hash for constructor
-      const hashedPassword = bcrypt.hashSync(adminPassword, 10);
+      const hashedPassword = await bcrypt.hash(adminPassword, 10);
       const adminUser: User = {
         id: "admin_1",
         username: "RaiAura Admin",
@@ -533,6 +603,7 @@ class MemoryStorage implements IStorage {
       this.users.set(adminUser.id, adminUser);
       console.log("✅ Admin user initialized: raiaura.shop@gmail.com");
     }
+    this.adminInitialized = true;
   }
 
   private generateId(): string {
@@ -540,18 +611,26 @@ class MemoryStorage implements IStorage {
   }
 
   async getUser(id: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
+    await this.ensureAdminInitialized();
     return this.users.get(id);
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
+    await this.ensureAdminInitialized();
     return Array.from(this.users.values()).find(u => u.username === username);
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
+    await this.ensureAdminInitialized();
     return Array.from(this.users.values()).find(u => u.email === email);
   }
 
   async getUserByFirebaseUid(firebaseUid: string): Promise<User | undefined> {
+    await this.ensureAdminInitialized();
+    await this.ensureAdminInitialized();
     return Array.from(this.users.values()).find(u => u.firebaseUid === firebaseUid);
   }
 
@@ -760,7 +839,32 @@ class MemoryStorage implements IStorage {
       item => item.userId === userId && item.productId === productId
     );
   }
+
+  // OTP methods for MemoryStorage
+  private otps: Map<string, Otp> = new Map();
+
+  async saveOTP(otp: InsertOtp): Promise<void> {
+    const id = this.generateId();
+    this.otps.set(otp.email, {
+      id,
+      email: otp.email,
+      otp: otp.otp,
+      expiresAt: new Date(otp.expiresAt),
+      username: otp.username ?? null,
+      isNewUser: otp.isNewUser ?? false
+    });
+  }
+
+  async getOTP(email: string): Promise<Otp | undefined> {
+    return this.otps.get(email);
+  }
+
+  async deleteOTP(email: string): Promise<void> {
+    this.otps.delete(email);
+  }
 }
 
-// Use Database storage (Firebase)
+// Use Memory storage (no external DB needed)
+// For production with Firebase, uncomment DatabaseStorage and enable Firestore API
+// export const storage = new MemoryStorage();
 export const storage = new DatabaseStorage();

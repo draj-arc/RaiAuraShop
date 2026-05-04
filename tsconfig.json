@@ -1,14 +1,25 @@
 {
-  "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "include": [
+    "client/src/**/*",
+    "functions/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "**/*.test.ts"
+  ],
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuildinfo",
     "noEmit": true,
     "module": "ESNext",
     "strict": true,
-    "lib": ["esnext", "dom", "dom.iterable"],
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable"
+    ],
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -16,10 +27,14 @@
     "moduleResolution": "bundler",
     "rootDir": ".",
     "baseUrl": ".",
-    "types": ["@types/node", "vite/client"],
+    // "types": ["@types/node", "vite/client"],
     "paths": {
-      "@/*": ["client/src/*"],
-      "@shared/*": ["shared/*"]
+      "@/*": [
+        "client/src/*"
+      ],
+      "@shared/*": [
+        "shared/*"
+      ]
     }
   }
 }

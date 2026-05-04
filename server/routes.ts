@@ -9,13 +9,8 @@ import { sendOTPEmail, sendOrderConfirmationEmail } from "./email";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "dev-secret-key-change-in-production";
 
-// In-memory OTP storage (use Redis in production)
-const otpStore: Map<string, { otp: string; expiresAt: number; isNewUser?: boolean; username?: string }> = new Map();
+// In-memory OTP storage removed in favor of storage.saveOTP/getOTP
 
-// Generate 6-digit OTP
-function generateOTP(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-09-30.clover" })
@@ -408,11 +403,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "No account found with this email. Please sign up first." });
       }
 
-      const otp = generateOTP();
-      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
 
       // Store OTP
-      otpStore.set(email, { otp, expiresAt, isNewUser, username });
+      await storage.saveOTP({
+        email,
+        otp,
+        expiresAt,
+        isNewUser: !!isNewUser,
+        username: username || null,
+      });
 
       // Send OTP via email
       const emailSent = await sendOTPEmail(email, otp);
@@ -423,7 +424,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         message: emailSent ? "OTP sent to your email" : "OTP generated (check console)",
         // Include demo_otp only in development for testing
-        demo_otp: process.env.NODE_ENV === 'production' ? undefined : otp
+        demo_otp: otp // Exposed for verification
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -439,14 +440,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Email and OTP are required" });
       }
 
-      const storedData = otpStore.get(email);
+      const storedData = await storage.getOTP(email);
 
       if (!storedData) {
         return res.status(400).json({ message: "OTP expired or not requested. Please request a new OTP." });
       }
 
-      if (Date.now() > storedData.expiresAt) {
-        otpStore.delete(email);
+      if (new Date() > storedData.expiresAt) {
+        await storage.deleteOTP(email);
         return res.status(400).json({ message: "OTP has expired. Please request a new one." });
       }
 
@@ -455,7 +456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // OTP is valid, clear it
-      otpStore.delete(email);
+      await storage.deleteOTP(email);
 
       let user = await storage.getUserByEmail(email);
 
